@@ -82,12 +82,6 @@ OpenPrd 会生成可以直接分享的 HTML 面板，让产品、研发和 Agent
 
 ![OpenPrd quality HTML](./docs/assets/openprd-quality-html.png)
 
-### 图示与视觉评审产物
-
-除 HTML 面板外，OpenPrd 也提供架构图、产品流程图和视觉对比评审图，适合在实现前后确认理解是否一致。
-
-![OpenPrd 图示示例](./docs/assets/openprd-diagram-demo.png)
-
 ## 功能
 
 - **Clarification-first**：`clarify -> capture -> classify -> interview -> synthesize -> diagram -> freeze -> handoff`

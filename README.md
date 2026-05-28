@@ -86,13 +86,6 @@ one human-readable quality surface before handoff, release, or publish.
 
 ![OpenPrd quality HTML](./docs/assets/openprd-quality-html.png)
 
-### Diagram and visual review artifacts
-
-OpenPrd also ships diagram and visual review outputs for architecture,
-product-flow, and UI replication work.
-
-![OpenPrd diagram demo](./docs/assets/openprd-diagram-demo.png)
-
 ## Features
 
 - **Clarification-first workflow**: `clarify -> capture -> classify -> interview -> synthesize -> diagram -> freeze -> handoff`
