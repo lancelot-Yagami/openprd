@@ -86,13 +86,13 @@ one human-readable quality surface before handoff, release, or publish.
 
 ![OpenPrd quality HTML](./docs/assets/openprd-quality-html.png)
 
-### `visual-compare` case study
+### Auto-optimized reference-to-screenshot comparison
 
 Put the reference and implementation into one side-by-side artifact for staged
 UI review, especially for auth-entry redesign, localized legal pages, and modal
 replication work.
 
-![OpenPrd visual compare case study](./docs/assets/openprd-visual-compare-case-study-en.png)
+![Auto-optimized reference-to-screenshot comparison](./docs/assets/openprd-visual-compare-case-study-en.png)
 
 ## Self-Evolving Collaboration
 
@@ -370,7 +370,7 @@ the change affects responsibilities, flows, structure, dependencies, or product
 behavior. If no documentation update is needed, agents should say the check was
 performed and why the existing docs still match the code.
 
-## UI Visual Compare
+## Auto-optimized reference-to-screenshot comparison
 
 When UI work already has a reference effect image, design image, user-provided
 screenshot, or agent-generated mock, the agent should capture the implemented
