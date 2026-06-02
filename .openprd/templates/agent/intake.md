@@ -1,6 +1,7 @@
 # Agent Intake
 
-- What must the agent do autonomously?
-- What must remain human-approved?
-- Which tools and state are available?
-- How do we evaluate success and failure?
+- 哪些步骤希望 Agent 自主完成？
+- 哪些节点必须保留人工确认、审核或兜底？
+- 这条流程会用到哪些工具、上下文、记忆或状态？
+- 第一版最希望先跑通哪一段 Agent 工作流？
+- 我们怎么判断它成功了，失败时又该怎么发现和恢复？

@@ -10,6 +10,7 @@
 - 第三方工具、SDK、CLI、API、MCP 或版本相关文档，优先用 Context7。
 - 官方工程博客和官方文档只提炼可验证原则，不复制大段原文。
 - 足够支撑当前 OpenPrd 决策后停止调研。
+- 执行过程中被用户采纳的优质来源可用 `openprd benchmark observe <url|repo|file> --notes <text>` 记录为候选 evidence；累计达到阈值后只提示用户 approve，不自动加入长期 registry。
 
 ## 来源分组
 

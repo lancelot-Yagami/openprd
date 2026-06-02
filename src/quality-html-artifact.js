@@ -98,7 +98,9 @@ function gateDescription(gate) {
   const descriptions = {
     smoke: '核心路径能否跑通，至少覆盖主流程和关键失败路径',
     'feature-coverage': '需求拆解项是否全部完成，验收点是否有对应回归',
+    'visual-review': '界面改动是否留下效果图对比或修改前后自检证据',
     'business-guardrails': '成本、额度、滥用、报警和止损是否讲清楚',
+    'test-strategy': '本次需求该用哪几层测试、证据怎么留下、是否有豁免',
     traceability: '出问题时是否能追到用户动作、请求、任务和错误',
     redaction: '报告、日志和错误信息是否会暴露敏感信息',
     'normal-performance': '普通规模下是否可用、不卡顿、不超时',
@@ -505,10 +507,18 @@ function evidenceItems(report) {
 
 function environmentItems(report) {
   const evalHarness = report.evalHarness;
+  const strategy = evalHarness.testStrategy ?? {};
   const obs = report.observability;
   const knowledge = report.knowledge;
   const businessGuardrails = report.businessGuardrails;
+  const visualReview = report.visualReview ?? { relevant: false, evidence: { present: false, summary: '当前场景未要求视觉评审证据' } };
   return [
+    {
+      summary: '分层测试策略',
+      detail: strategy.total > 0
+        ? `显式 ${strategy.explicit ?? 0} 项，推导 ${strategy.inferred ?? 0} 项，已规划证据 ${strategy.evidencePlanned ?? 0} 项`
+        : '当前没有可分析的任务级测试策略',
+    },
     {
       summary: evalHarness.smoke.present ? '主流程验证可用' : '主流程验证缺失',
       detail: evalHarness.smoke.commands.join(' / ') || '还没有发现可直接复跑的验证入口',
@@ -516,6 +526,12 @@ function environmentItems(report) {
     {
       summary: '任务覆盖',
       detail: `已完成 ${evalHarness.featureCoverage.activeTasks.done}/${evalHarness.featureCoverage.activeTasks.total}，待处理 ${evalHarness.featureCoverage.activeTasks.pending}`,
+    },
+    {
+      summary: '视觉证据',
+      detail: visualReview.relevant
+        ? (visualReview.evidence?.summary ?? '需要补充本次视觉对比证据')
+        : '当前场景未要求视觉评审证据',
     },
     {
       summary: '问题追踪',
@@ -529,6 +545,45 @@ function environmentItems(report) {
       summary: '经验沉淀',
       detail: knowledge.skills.length > 0 ? `已有 ${knowledge.skills.length} 个项目经验` : '首次稳定问题修复后应沉淀经验',
     },
+  ];
+}
+
+function layerLabel(layer) {
+  const labels = {
+    unit: '单元',
+    integration: '集成',
+    e2e: '端到端',
+    manual: '人工',
+    smoke: '冒烟',
+    visual: '视觉',
+    performance: '性能',
+    security: '安全',
+    weapp: '小程序',
+    none: '无',
+  };
+  return labels[layer] ?? layer;
+}
+
+function strategyItems(report) {
+  const strategy = report.evalHarness?.testStrategy ?? {};
+  const layerCounts = strategy.layerCounts ?? {};
+  const layerSummary = Object.entries(layerCounts)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([layer, count]) => `${layerLabel(layer)} ${count}`)
+    .join('，');
+  const warnings = strategy.warnings ?? [];
+  return [
+    {
+      summary: strategy.total > 0 ? `已分析 ${strategy.total} 个任务` : '暂无任务策略',
+      detail: layerSummary || '没有检测到任务级测试层级',
+    },
+    {
+      summary: `证据计划 ${strategy.evidencePlanned ?? 0}/${strategy.total ?? 0}`,
+      detail: strategy.evidencePresent > 0 ? `已有 ${strategy.evidencePresent} 项证据记录` : '当前重点是确认该测哪一层，再留下本次执行证据',
+    },
+    ...(warnings.length > 0
+      ? warnings.slice(0, 3).map((warning) => ({ summary: '需关注', detail: humanText(warning) }))
+      : [{ summary: '比例规则', detail: '70/20/10 只作健康形状参考，不作为硬阻断' }]),
   ];
 }
 
@@ -1290,12 +1345,25 @@ export function renderQualityEvalArtifact({ report }) {
       title: '执行环境与覆盖',
       description: '区分项目具备测试能力，和这次是否真的留下证据',
       chips: [
+        chip(`测试策略 ${report.evalHarness.testStrategy?.total ?? 0} 项`, (report.evalHarness.testStrategy?.total ?? 0) > 0 ? 'note' : 'warn'),
         chip(report.evalHarness.smoke.present ? '主流程验证可用' : '缺主流程验证', report.evalHarness.smoke.present ? 'pass' : 'warn'),
         chip(report.observability.correlationFields.length > 0 ? '问题可追踪' : '追踪线索不足', report.observability.correlationFields.length > 0 ? 'pass' : 'warn'),
         chip(report.businessGuardrails.missingEvidence.length > 0 ? '成本护栏待补' : '成本护栏完整', report.businessGuardrails.missingEvidence.length > 0 ? 'warn' : 'pass'),
       ],
       items: environmentItems(report),
       emptyText: '还没有检测到执行环境信息。',
+    }),
+    panel({
+      kind: 'check',
+      title: '分层测试策略',
+      description: '按需求风险选择最小足够证据，不把固定比例当硬指标',
+      chips: [
+        chip(`显式 ${report.evalHarness.testStrategy?.explicit ?? 0}`, 'note'),
+        chip(`推导 ${report.evalHarness.testStrategy?.inferred ?? 0}`, 'note'),
+        chip(`证据计划 ${report.evalHarness.testStrategy?.evidencePlanned ?? 0}`, (report.evalHarness.testStrategy?.evidencePlanned ?? 0) > 0 ? 'pass' : 'warn'),
+      ],
+      items: strategyItems(report),
+      emptyText: '还没有任务级测试策略。',
     }),
   ].join('\n');
 

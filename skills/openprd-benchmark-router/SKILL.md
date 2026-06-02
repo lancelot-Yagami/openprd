@@ -40,6 +40,7 @@ description: 为 OpenPrd 产品、CLI、Agent harness、AI code review / PR revi
 - 项目自己的 `.openprd/benchmarks/` 优先于 OpenPrd 内置 Source Map。
 - `sources.yaml` 里的 approved source 是长期可复用参考；`inbox/` 里的 candidate 只表示待确认线索。
 - 用 `openprd benchmark add <url|repo|file>` 写入 candidate，用 `openprd benchmark approve <id>` 纳入 approved registry。
+- 执行或复盘中发现被用户采纳的优质信源时，用 `openprd benchmark observe <url|repo|file> --notes <text>` 累计 evidence；达到阈值后只推荐 approve，不自动晋级。
 - 用 `openprd benchmark verify` 检查重复来源、失效链接、缺失本地文件和过宽触发规则。
 
 ## Source Policy

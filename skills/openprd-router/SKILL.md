@@ -22,11 +22,12 @@ description: OpenPrd 入口路由 skill。先判断当前任务该读哪个 repo
 
 ## 路由表
 
-- 主工作流、需求入口、review/change/tasks、`run/loop`：`skills/openprd-harness/SKILL.md`
+- 需求入口分流、用户可见需求类型与内部 L0/L1/L2 路由码对照、PRD lens 选择：`skills/openprd-requirement-intake/SKILL.md`
+- 主工作流、review/change/tasks、`run/loop`：`skills/openprd-harness/SKILL.md`
 - 最佳实践、benchmark、公开 GitHub 仓库、第三方技术事实、prompt/context engineering：`skills/openprd-benchmark-router/SKILL.md`
 - `docs/basic/`、文件说明书、文件夹 README、文档标准：`skills/openprd-standards/SKILL.md`
 - 就绪验证、EVO 门禁、HTML 质量评估报告、项目经验沉淀：`skills/openprd-quality/SKILL.md`
-- 架构图、产品流程图、可视评审：`skills/openprd-diagram-review/SKILL.md`
+- 架构图、产品流程图、可视评审、大界面改动效果图方案评审：`skills/openprd-diagram-review/SKILL.md` 与 `skills/openprd-harness/SKILL.md`
 - 长时间只读挖掘、参考项目持续调研、requirements/specs/tasks 补全：`skills/openprd-discovery-loop/SKILL.md`
 - 学习包、归档阅读器、知识整理：`skills/openprd-learning-review/SKILL.md`
 
@@ -36,3 +37,4 @@ description: OpenPrd 入口路由 skill。先判断当前任务该读哪个 repo
 - hooks 已经强制处理 requirement / research / secrets / skill-visualization / weapp / browser / copy 这些门禁
 - 公开 GitHub 仓库架构/对标先 DeepWiki；第三方库、API、SDK、MCP、CLI 用法先查本地证据，本地不足时再按 `resolve_library_id -> query_docs` 使用 Context7
 - 如果用户只是要规划、分析、评审或解释影响范围，保持只读，不要因为命令存在就直接执行写入
+- 不要用固定关键词决定是否写 PRD；先让 `openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本做语义分流

@@ -69,6 +69,8 @@ and agents can look at the same artifact before work moves forward.
 
 Use a review-ready PRD surface instead of asking teammates to reconstruct the
 latest requirement state from chat history.
+If the optional `release` ledger is enabled, the review header also shows the
+current project version.
 
 ![OpenPrd review HTML](https://raw.githubusercontent.com/mileson/openprd/main/docs/assets/openprd-review-html.png)
 
@@ -133,6 +135,7 @@ automatically.
 - **UI visual comparison artifacts**: combine reference images and implementation screenshots into side-by-side JPG reviews for visual replication work
 - **Contract-driven diagrams**: render from validated JSON contracts
 - **Review status tracking**: use `pending-confirmation`, `confirmed`, and `needs-revision`
+- **Project release/version ledger**: optionally track project versions such as `0.1.23`, version-scoped change items, and local git tag coordination without mixing them with internal PRD `v000x` versions
 - **OpenPrd discovery mode**: initialize durable coverage runs for existing projects, reference projects, or unclear requirements
 - **Project standards**: initialize and verify `docs/basic/`, file manual templates, and folder README templates as part of execution quality gates
 - **Quality Regression Reports**: review overall regression status, per-requirement module status, test-block results, observability, business cost and abuse guardrails, smoke coverage, performance baselines, and project knowledge through HTML reports
@@ -141,6 +144,15 @@ automatically.
 - **Long-running agent loop**: turn accepted change tasks into one-task-per-session Codex or Claude execution prompts with verification, progress logs, and optional task commits
 - **Default agent integration**: generate Codex, Claude, and Cursor guidance from one OpenPrd source, including Codex hooks with `codex_hooks = true`
 - **Agent harness skills**: repo-local skills for shared rules, workflow control, and diagram review
+
+## 0.1.2 Highlights
+
+- **First-round project framing**: `clarify` and intake now summarize product shape, target users, first-cut scope, non-goals, and guardrails before the workflow narrows into a local request.
+- **Review presentation gate**: `review-presentation` validates the user-facing review summary before `review.html` becomes the stable confirmation surface.
+- **Test strategy plus execution strategy**: task metadata now supports `test-layer`, `test-size`, `evidence-plan`, `execution-mode`, `write-scope`, `local-verify`, and `integration-owner` for main-agent/worker coordination.
+- **Safer historical session continuation**: a global session registry helps restore tool-agnostic session IDs such as `continue: <session-id>` across workspaces.
+- **Richer benchmark and knowledge capture**: this round adds `benchmark observe`, knowledge candidate / draft-skill review flow, and explicit Codex repair entry points through `doctor --tools codex --fix` and `loop --run --agent codex --repair-agent`.
+- **Before/after visual review**: `visual-compare` now supports `--before/--after` so UI changes can still leave visual evidence even without a design reference.
 
 ## Tech Stack
 
@@ -197,12 +209,38 @@ Concrete bugfix prompts with diagnostic evidence such as errors, logs, repro
 steps, or root-cause investigation skip requirement intake when the user asks to
 fix directly; confirmation wording also accepts phrases like "confirm the fix".
 
+`init` also performs a non-blocking optional capability check and records the
+result in `.openprd/harness/install-manifest.json` under `optionalCapabilities`.
+Examples:
+
+- `Context7`: helps the agent retrieve current third-party technical docs,
+  config, version differences, migration paths, and high-quality implementation
+  guidance
+- `DeepWiki`: helps the agent understand public GitHub repositories through
+  conversational architecture and implementation lookup
+
+If these capabilities are not configured yet, initialization still succeeds.
+OpenPrd records them as follow-up suggestions and includes the official docs,
+GitHub repo, and MCP endpoint so the current client can be configured later.
+
 ### 2. Check the current collaboration state
 
 ```bash
 openprd status /path/to/project
 openprd next /path/to/project
 ```
+
+When the project-level release track is enabled, `status` also shows the current project version and how many change items are currently accumulated under it.
+
+### 2b. Optional: set a project release track
+
+```bash
+openprd release /path/to/project --set 0.1.23
+openprd release /path/to/project --notes "Add a release-note entry point"
+openprd release /path/to/project
+```
+
+`release` manages the project-level version ledger, not the internal OpenPrd PRD version such as `v0004`. Once enabled, handoff exports, release-note snippets, and local tag coordination in `loop --finish --commit` will reuse that version state.
 
 ### 3. Clarify with the user
 
@@ -277,6 +315,8 @@ openprd tasks /path/to/project --change <change-id>
 openprd freeze /path/to/project
 openprd handoff /path/to/project --target openprd
 ```
+
+If the optional `release` ledger is enabled, handoff exports prefer the change items accumulated under the current project version and also include a human-readable `Project version: 0.1.23` field.
 
 ### 7. Start OpenPrd discovery mode
 
@@ -542,10 +582,16 @@ or `openprd setup` inside a project.
 - `.cursor/rules/openprd.mdc` and `.cursor/commands/`
 - `.openprd/harness/install-manifest.json`, `hook-state.json`, `events.jsonl`, `drift-report.json`, and `visual-reviews/`
 
+`setup`, `init`, `update`, and `doctor` also maintain
+`optionalCapabilities` inside `.openprd/harness/install-manifest.json`. These
+entries are only “better when configured” recommendations and never turn
+initialization, diagnostics, or the current task into a failure.
+
 `doctor` verifies that the generated rules, Codex hooks feature flag, standards,
-and workspace validation are healthy. `update` refreshes the generated adapter
-files from the canonical OpenPrd source while preserving unrelated user hook
-groups.
+and workspace validation are healthy, and also surfaces optional enhancement
+recommendations such as Context7 or DeepWiki. `update` refreshes the generated
+adapter files from the canonical OpenPrd source while preserving unrelated user
+hook groups.
 
 `self-update` updates the OpenPrd CLI itself from the public npm package.
 `upgrade` composes the two update layers: it first runs `self-update`, then
@@ -602,8 +648,10 @@ openprd loop . --prompt --agent codex
 openprd loop . --run --agent codex --dry-run
 openprd loop . --run --agent claude --dry-run
 openprd loop . --verify --item T001.01
-openprd loop . --finish --item T001.01 --commit --message "Complete T001.01"
+openprd loop . --finish --item T001.01 --commit --message "Add a release-note entry point"
 ```
+
+When the project-level release track is enabled, `loop --finish --commit` records the task's short user-facing summary under the current project version and then tries to move the same-name local tag (for example `0.1.23`) to the latest commit. If a remote tag with the same name already exists, OpenPrd warns and skips the local retag instead of silently rewriting remote history.
 
 The loop writes its durable state under `.openprd/harness/`:
 
@@ -650,6 +698,7 @@ Use it to understand:
 - user participation mode
 - current gate
 - upcoming gate
+- current project version, if the release track is enabled
 
 Example signals:
 

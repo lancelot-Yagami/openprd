@@ -1,6 +1,7 @@
 # B2B Intake
 
-- Who is the buyer?
-- Who is the daily user?
-- Who is the admin?
-- What approval or compliance step can block rollout?
+- 谁是买单或拍板的人？
+- 谁是每天真正会用的人？谁负责配置、运营或管理员工作？
+- 这是给内部团队用，还是要卖给客户/合作方用？
+- 哪个审批、合规、集成或交付环节最容易卡住上线？
+- 如果只能先交付第一版，最小可用切片应该先覆盖哪段业务流程？

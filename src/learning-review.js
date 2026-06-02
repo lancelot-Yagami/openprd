@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { appendText, exists, readJson, readText, readYaml, writeJson, writeText, writeYaml } from './fs-utils.js';
+import { openArtifactInBrowser, writeHtmlArtifact } from './html-artifacts.js';
+import { learningPackagePaths, renderLearningArtifact } from './learning-html-artifact.js';
 import { buildPrdSnapshot, formatVersionId } from './prd-core.js';
 import { compactTimestamp, timestamp } from './time.js';
 import { loadLatestVersionSnapshot, loadWorkspace, readVersionIndex, resolveActiveTemplatePack, resolveCurrentProductType } from './workspace-core.js';
-import { appendText, exists, readJson, readText, readYaml, writeJson, writeText, writeYaml } from './fs-utils.js';
-import { learningPackagePaths, openArtifactInBrowser, renderLearningArtifact, writeHtmlArtifact } from './html-artifacts.js';
 
 const LEARNING_REVIEW_SCHEMA_VERSION = 1;
 const LEARNING_AGENT_CONTEXT_SCHEMA = 'openprd.learning-agent-context.v1';

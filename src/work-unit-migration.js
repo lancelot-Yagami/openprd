@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { canonicalReviewPath, defaultReviewArtifactPath, renderReviewArtifact, renderReviewEntryHtml, writeHtmlArtifact } from './html-artifacts.js';
 import { summarizeSnapshot } from './prd-core.js';
+import { buildReleaseLedgerSummary } from './release-ledger.js';
 import { appendWorkflowEvent, buildWorkflowTaskGraph, loadWorkspace, readVersionIndex, readVersionSnapshot, writeVersionIndex, writeVersionSnapshot } from './workspace-core.js';
 import { exists, readText, writeJson } from './fs-utils.js';
 import { writeWorkUnitBinding } from './work-unit.js';
@@ -82,7 +83,10 @@ function buildBackfilledSnapshot(ws, snapshot, isLatest) {
 async function writeReviewBundle(ws, snapshot, isLatest) {
   const activeReviewArtifact = defaultReviewArtifactPath(ws);
   const reviewPath = canonicalReviewPath(ws, snapshot.versionId);
-  await writeHtmlArtifact(reviewPath, renderReviewArtifact({ snapshot }));
+  await writeHtmlArtifact(reviewPath, renderReviewArtifact({
+    snapshot,
+    projectRelease: buildReleaseLedgerSummary(ws.data.releaseLedger),
+  }));
 
   if (isLatest) {
     await writeHtmlArtifact(activeReviewArtifact, renderReviewEntryHtml({

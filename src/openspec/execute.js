@@ -115,7 +115,57 @@ function assertTaskReady(task, state) {
   return dependencyState;
 }
 
-async function runVerifyCommand(command, cwd) {
+function isTaskEvidenceRequiredCommand(command) {
+  return /^openprd\s+tasks\s+\./i.test(String(command ?? ''))
+    && /\s--evidence-required\b/i.test(String(command ?? ''));
+}
+
+function isLegacyPerTaskFullVerifyCommand(command) {
+  return /^openprd\s+run\s+\.\s+--verify\s*$/i.test(String(command ?? '').replace(/\s+/g, ' ').trim());
+}
+
+function taskEvidenceState(task, options = {}) {
+  const metadata = task?.metadata ?? {};
+  const evidence = String(options.evidence ?? metadata.evidence ?? '').trim();
+  const waiver = String(metadata.waiver ?? metadata['waiver-reason'] ?? '').trim();
+  return {
+    evidence,
+    waiver,
+    ok: Boolean(evidence || waiver),
+  };
+}
+
+function buildTaskEvidenceVerification(command, task, options = {}) {
+  const evidenceState = taskEvidenceState(task, options);
+  const legacyHint = isLegacyPerTaskFullVerifyCommand(command)
+    ? '旧任务里的 per-task openprd run . --verify 已保留给阶段或最终门禁，不会在任务推进时触发全局 quality。'
+    : null;
+  const hint = `${legacyHint ? `${legacyHint} ` : ''}先运行本任务最小足够测试或审查，再通过 --evidence <路径或摘要> 传入证据，或在 tasks.md 写入 evidence:/waiver-reason:。`;
+  return {
+    ok: evidenceState.ok,
+    command,
+    exitCode: evidenceState.ok ? 0 : 1,
+    stdout: evidenceState.ok
+      ? [
+          'OpenPrd task evidence: passed',
+          evidenceState.evidence ? `evidence: ${evidenceState.evidence}` : null,
+          evidenceState.waiver ? `waiver: ${evidenceState.waiver}` : null,
+          legacyHint,
+          'scope: task-only; workspace quality is reserved for phase/final gates',
+          '',
+        ].filter(Boolean).join('\n')
+      : '',
+    stderr: evidenceState.ok
+      ? ''
+      : `OpenPrd task evidence: missing evidence for ${task?.id ?? 'task'}. ${hint}\n`,
+  };
+}
+
+async function runVerifyCommand(command, cwd, context = {}) {
+  if ((isTaskEvidenceRequiredCommand(command) || isLegacyPerTaskFullVerifyCommand(command)) && context.task) {
+    return buildTaskEvidenceVerification(command, context.task, context);
+  }
+
   return new Promise((resolve) => {
     const child = spawn(command, {
       cwd,
@@ -150,6 +200,22 @@ async function runVerifyCommand(command, cwd) {
       });
     });
   });
+}
+
+export async function checkOpenSpecTaskEvidenceWorkspace(projectRoot, options = {}) {
+  const state = await loadTaskState(projectRoot, options);
+  const task = resolveTaskSelection(state, options);
+  assertTaskReady(task, state);
+  const command = `openprd tasks . --change ${state.changeId} --item ${task.id} --evidence-required`;
+  const verification = buildTaskEvidenceVerification(command, task, options);
+  return {
+    ok: verification.ok,
+    action: 'evidence-check',
+    projectRoot,
+    changeId: state.changeId,
+    task,
+    verification,
+  };
 }
 
 async function markTaskComplete(task) {
@@ -208,7 +274,12 @@ export async function verifyOpenSpecTaskWorkspace(projectRoot, options = {}) {
   if (!task.metadata.verify) {
     throw new Error(`${task.id} is missing verify command.`);
   }
-  const verification = await runVerifyCommand(task.metadata.verify, projectRoot);
+  const verification = await runVerifyCommand(task.metadata.verify, projectRoot, {
+    task,
+    state,
+    evidence: options.evidence,
+    notes: options.notes,
+  });
   await appendTaskEvent(state, {
     action: 'verify',
     taskId: task.id,
@@ -239,7 +310,12 @@ export async function advanceOpenSpecTaskWorkspace(projectRoot, options = {}) {
     if (!task.metadata.verify) {
       throw new Error(`${task.id} is missing verify command.`);
     }
-    verification = await runVerifyCommand(task.metadata.verify, projectRoot);
+    verification = await runVerifyCommand(task.metadata.verify, projectRoot, {
+      task,
+      state,
+      evidence: options.evidence,
+      notes: options.notes,
+    });
     if (!verification.ok) {
       await appendTaskEvent(state, {
         action: 'advance_failed',

@@ -1,11 +1,11 @@
 {
   "name": "@openprd/cli",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI-native PRD workspace and lifecycle CLI",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "openprd": "./bin/openprd.js"
+    "openprd": "bin/openprd.js"
   },
   "files": [
     "AGENTS.md",
@@ -17,30 +17,14 @@
     "docs/assets",
     "scripts",
     "src",
-    ".openprd",
-    "!.openprd/artifacts",
-    "!.openprd/artifacts/**",
-    "!.openprd/harness",
-    "!.openprd/harness/**",
-    "!.openprd/learning",
-    "!.openprd/learning/**",
-    "!.openprd/quality/evidence",
-    "!.openprd/quality/evidence/**",
-    "!.openprd/quality/reports",
-    "!.openprd/quality/reports/**",
-    "!.openprd/growth/preferences.local.json",
-    "!.openprd/knowledge/incidents",
-    "!.openprd/knowledge/incidents/**",
-    "!.openprd/knowledge/patterns",
-    "!.openprd/knowledge/patterns/**",
-    "!.openprd/knowledge/skills",
-    "!.openprd/knowledge/skills/**",
-    "!.openprd/state/events.jsonl",
-    "!.openprd/state/task-graph.json",
-    "!.openprd/engagements/active/decision-log.md",
-    "!.openprd/engagements/active/open-questions.md",
-    "!.openprd/engagements/active/progress.md",
-    "!.openprd/engagements/active/verification.md",
+    ".openprd/README.md",
+    ".openprd/README_EN.md",
+    ".openprd/config.yaml",
+    ".openprd/schema",
+    ".openprd/standards",
+    ".openprd/templates",
+    ".openprd/quality/config.json",
+    ".openprd/engagements/active/intake.md",
     "skills"
   ],
   "engines": {
@@ -49,7 +33,9 @@
   "scripts": {
     "start": "node ./bin/openprd.js",
     "test": "node --test",
-    "test:smoke": "node --test --test-name-pattern \"quality requires current smoke evidence|run exposes hook-stable\""
+    "test:smoke": "node --test --test-name-pattern \"quality requires current smoke evidence|run exposes hook-stable\"",
+    "test:perf": "node scripts/quality-perf-check.mjs --mode normal",
+    "test:perf:extreme": "node scripts/quality-perf-check.mjs --mode extreme --fixture test/fixtures/release-ledger-extreme.json"
   },
   "dependencies": {
     "sharp": "^0.34.5",

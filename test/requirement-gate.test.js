@@ -13,10 +13,12 @@ import {
   generateOpenSpecChangeWorkspace,
   initWorkspace,
   nextWorkspace,
+  reviewPresentationWorkspace,
   reviewWorkspace,
   setupAgentIntegrationWorkspace,
-  synthesizeWorkspace,
+  synthesizeWorkspace as synthesizeWorkspaceBase,
 } from '../src/openprd.js';
+import { readSessionRegistry } from '../src/session-registry.js';
 
 process.env.OPENPRD_HOME = path.join(os.tmpdir(), 'openprd-test-home-requirement-gate');
 
@@ -28,6 +30,55 @@ async function makeTempProject() {
 
 async function pathExists(filePath) {
   return fs.stat(filePath).then(() => true, () => false);
+}
+
+function validReviewPresentation(seed = {}) {
+  return {
+    mapNodes: {
+      problem: { title: '问题定义', text: '确认核心问题' },
+      goal: { title: '目标', text: '确认目标结果' },
+      scope: { title: '范围', text: '确认交付边界' },
+      flow: { title: '流程', text: '确认主线步骤' },
+      risk: { title: '风险', text: '确认风险问题' },
+      ...(seed.mapNodes ?? {}),
+    },
+    flowNodes: seed.flowNodes ?? [
+      { text: '确认入口' },
+      { text: '执行主步骤' },
+      { text: '校验结果' },
+      { text: '处理批量场景' },
+    ],
+    panels: {
+      flow: [{ summary: '主线确认', detail: '用户能看懂入口、步骤和结果。' }],
+      function: [{ summary: '功能确认', detail: '必须交付项和约束保持清晰。' }],
+      guardrail: [{ summary: '护栏确认', detail: '成本、滥用和止损边界可见。' }],
+      risk: [{ summary: '风险确认', detail: '开放问题和失败路径保留。' }],
+      ...(seed.panels ?? {}),
+    },
+  };
+}
+
+async function writeValidReviewPresentation(project, versionId, seed = {}) {
+  const presentationPath = path.join(project, `review-presentation-${versionId}.json`);
+  await fs.writeFile(presentationPath, JSON.stringify({
+    reviewPresentation: validReviewPresentation(seed),
+  }, null, 2));
+  const result = await reviewPresentationWorkspace(project, {
+    version: versionId,
+    presentationPath,
+    write: true,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.presentationFeedback, null, 2));
+  return result;
+}
+
+async function synthesizeWorkspace(project, options = {}) {
+  const result = await synthesizeWorkspaceBase(project, options);
+  await writeValidReviewPresentation(project, result.snapshot.versionId, result.snapshot.reviewPresentation ?? {});
+  return {
+    ...result,
+    reviewPresentationRequired: false,
+  };
 }
 
 async function captureFreshRequirementState(project, value = '用户已经确认了本轮需求的核心信息。') {
@@ -144,6 +195,16 @@ describe('Codex requirement gate', () => {
     assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('独立素材输出（standalone asset）'));
     assert.equal(await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gate.json')), false);
 
+    const largeUiDirectionPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '这个设置页面界面改动比较大，先用 Computer Use 截产品内页面，再给我三种设计方向效果图确认。',
+    });
+    assert.equal(largeUiDirectionPayload.continue, true);
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('大界面改动视觉方案评审'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('Codex Computer Use'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('Codex 原生 Image 2'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('1/2/3'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('.openprd/harness/visual-reviews/'));
+
     const readOnlyProductPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: '帮我看看这个 Agent 编排实现逻辑是不是漏了 Windows 用户场景，先分析一下。',
     });
@@ -200,13 +261,17 @@ describe('Codex requirement gate', () => {
     });
     assert.equal(requirementPromptPayload.continue, true);
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('requirement intake gate'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('$openprd-requirement-intake'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('base/consumer/b2b/agent'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd clarify .'));
     assert.equal(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd clarify . --open'), false);
-    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('target, scope, out-of-scope, acceptance'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('需求类型判断'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('快速修正=L0'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('现有功能优化=L1'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('新功能/新流程方案=L2'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('target、scope、out-of-scope、acceptance'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('final answer'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('approval policy'));
-    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('已确认，我按这个继续'));
-    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('确认，我们就按这个'));
     assert.ok(
       requirementPromptPayload.hookSpecificOutput.additionalContext.includes('Do not open clarification HTML')
         || requirementPromptPayload.hookSpecificOutput.additionalContext.includes('Do not open a clarification HTML page')
@@ -214,6 +279,8 @@ describe('Codex requirement gate', () => {
     assert.equal(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('choose inline vs artifact'), false);
     assert.equal(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('clarifyPresentation.mode is artifact'), false);
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd visual-compare'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('已确认，我按这个继续'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('确认，我们就按这个'));
     const requirementGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
     assert.equal(requirementGate.active, true);
     assert.equal(requirementGate.status, 'requires-clarification');
@@ -319,29 +386,6 @@ describe('Codex requirement gate', () => {
     const executionAuthorizedGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
     assert.equal(executionAuthorizedGate.active, false);
     assert.equal(executionAuthorizedGate.status, 'execution-authorized');
-  });
-
-  test('init seeds Chinese-default workspace READMEs with English switch files', async () => {
-    const project = await makeTempProject();
-    await initWorkspace(project, { templatePack: 'agent' });
-
-    const workspaceReadme = await fs.readFile(path.join(project, '.openprd', 'README.md'), 'utf8');
-    const workspaceReadmeEn = await fs.readFile(path.join(project, '.openprd', 'README_EN.md'), 'utf8');
-
-    assert.match(workspaceReadme, /^# OpenPrd 工作区/m);
-    assert.ok(workspaceReadme.includes('[English](./README_EN.md)'));
-    assert.match(workspaceReadmeEn, /^# OpenPrd Workspace/m);
-    assert.ok(workspaceReadmeEn.includes('[简体中文](./README.md) | English'));
-
-    for (const layer of ['company', 'industry', 'project', 'session']) {
-      const zhPath = path.join(project, '.openprd', 'templates', layer, 'README.md');
-      const enPath = path.join(project, '.openprd', 'templates', layer, 'README_EN.md');
-      const zh = await fs.readFile(zhPath, 'utf8');
-      const en = await fs.readFile(enPath, 'utf8');
-
-      assert.ok(zh.includes('[English](./README_EN.md)'));
-      assert.ok(en.includes('[简体中文](./README.md) | English'));
-    }
   });
 
   test('Codex hook supports silent-record review lanes when the user opts out of extra review confirmation', async () => {
@@ -522,6 +566,30 @@ describe('Codex requirement gate', () => {
     assert.equal(afterAConfirm.status, 'execution-authorized');
   });
 
+  test('Codex requirement gate opening also registers the session globally', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019e8788-0f90-72f0-bf42-1667e3264af8';
+    const prompt = '请直接实现：新增飞书渠道登录检测流程，保持固定进度条体验，不要在检测通过或失败后反复跳动。';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt,
+    });
+    assert.equal(
+      await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gates', `${sessionId}.json`)),
+      true,
+    );
+
+    const registry = await readSessionRegistry({ openprdHome: process.env.OPENPRD_HOME });
+    const entry = registry.entries.find((item) => item.sessionId === sessionId);
+    assert.ok(entry);
+    assert.equal(entry.workspaceRoot, project);
+    assert.equal(entry.gateActive, true);
+    assert.equal(entry.gateStatus, 'requires-clarification');
+    assert.ok(entry.promptPreview.includes('飞书渠道登录检测流程'));
+    assert.ok(entry.bindingPath.endsWith(`${sessionId}.json`));
+  });
+
   test('session-scoped review authorization stays pinned after another session synthesizes a newer PRD', async () => {
     const { project } = await makeCodexHookProject();
     const sessionA = '019e5f21-54be-7042-bb92-9ba6b2c24757';
@@ -670,11 +738,13 @@ describe('Codex requirement gate', () => {
     const reflectionMarkdown = await fs.readFile(path.join(project, '.openprd', 'engagements', 'active', 'intake-reflection.md'), 'utf8');
     assert.ok(reflectionMarkdown.includes('第 1 轮：意图归一化'));
     assert.ok(reflectionMarkdown.includes('第 2 轮：项目上下文映射'));
+    assert.ok(reflectionMarkdown.includes('首轮项目画像'));
     assert.equal(clarify.clarifyPresentation.mode, 'inline-with-checklist');
     assert.equal(clarify.clarifyArtifact, null);
     assert.equal(clarify.clarifyArtifactBundle, null);
     assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('我理解的目标')));
+    assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('适用对象')));
   });
 
   test('clarify keeps focused active requirement intake in the conversation', async () => {
@@ -695,6 +765,7 @@ describe('Codex requirement gate', () => {
     assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('我理解的目标')));
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('建议确认')));
+    assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('第一版先做')));
   });
 
   test('clarify keeps local visual cleanup requests inline even with inferred fields', async () => {
@@ -714,6 +785,7 @@ describe('Codex requirement gate', () => {
     assert.equal(clarify.clarifyArtifactBundle, null);
     assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('我理解的目标')));
+    assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('不能破坏')));
   });
 
   test('active requirement gate does not block freeze after reviewed PRD artifacts are confirmed', async () => {

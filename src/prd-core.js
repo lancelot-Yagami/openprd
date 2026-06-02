@@ -292,6 +292,7 @@ export function buildPrdSnapshot(ws, options = {}) {
     status: 'synthesized',
     sections,
     reviewPresentation: pickValue(options.reviewPresentation, state.reviewPresentation, null),
+    reviewPresentationMeta: pickValue(options.reviewPresentationMeta, state.reviewPresentationMeta, null),
     workUnitId: pickValue(options.workUnitId, state.activeWorkUnitId, null),
     targetRoot: pickValue(options.targetRoot, state.targetRoot, ws.projectRoot),
   };

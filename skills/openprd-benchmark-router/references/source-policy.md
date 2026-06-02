@@ -26,6 +26,8 @@
 
 - `benchmark-sources.md` 是路由索引，不是事实来源。
 - 来源目录只代表候选来源，不代表来源内容已经被核验。
+- `openprd benchmark observe` 记录的是“被采纳过的信源线索”和 evidence，不代表该来源内容已经被完整核验。
+- candidate 达到采纳阈值后只推荐 approve；用户确认前仍不能当作长期 approved benchmark。
 - 长期偏好只能记录用户确认过的复用经验，不替代外部核验。
 
 ## 何时停止调研

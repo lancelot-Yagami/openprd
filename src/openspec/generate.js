@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { preferSimplifiedChinese } from '../language-policy.js';
 import { needsBusinessGuardrails } from '../prd-core.js';
+import { EXECUTION_STRATEGY_METADATA_KEYS, formatTaskExecutionStrategyMetadata } from '../execution-strategy.js';
+import { TEST_STRATEGY_METADATA_KEYS, formatTaskTestStrategyMetadata } from '../test-strategy.js';
 import { OPENSPEC_TASK_MAX_ITEMS_PER_FILE } from './constants.js';
 import { openPrdChangeRoot, openPrdDiscoveryConfigPath, readDiscoveryConfig } from './paths.js';
 
@@ -143,7 +145,12 @@ function chunkItems(items, maxItemsPerChunk = 2) {
   return chunks;
 }
 
-const DEFAULT_EXECUTION_VERIFY_COMMAND = 'openprd run . --verify';
+function defaultTaskVerifyCommand(changeId, task) {
+  if (task.type === 'documentation') {
+    return 'openprd standards . --verify';
+  }
+  return `openprd tasks . --change ${changeId} --item ${task.id} --evidence-required`;
+}
 
 const ARCHITECTURE_TASK_DEFINITIONS = [
   {
@@ -321,7 +328,6 @@ function inferArchitectureTasks(snapshot) {
       type: 'implementation',
       title: definition.title,
       done: `${definition.done} 涉及: ${summarizeTaskItems(matches, 2, 72)}。`,
-      verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
       phase: 'architecture',
     }));
 }
@@ -345,7 +351,6 @@ function buildRequirementImplementationTasks(snapshot) {
       type: 'implementation',
       title: cleanImplementationTitle(item),
       done: buildDoneText('已完成：', item),
-      verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
       phase: 'implementation',
     });
   }
@@ -364,7 +369,6 @@ function buildFlowIntegrationTasks(snapshot) {
     type: 'implementation',
     title: `打通主流程闭环：${summarizeTaskItems(flows, 2, 56)}`,
     done: `主流程关键节点已经打通，用户可以按预期从入口走到结果收尾。涉及: ${summarizeTaskItems(flows, 2, 72)}。`,
-    verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
     phase: 'integration',
   }];
 }
@@ -376,7 +380,6 @@ function buildAcceptanceVerificationTasks(snapshot) {
     type: 'verification',
     title: buildVerificationTitle(item),
     done: buildDoneText('已验证：', item),
-    verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
     phase: 'verification',
   }));
 }
@@ -388,7 +391,6 @@ function buildNonFunctionalVerificationTasks(snapshot) {
     type: 'verification',
     title: `回归非功能约束：${summarizeTaskItems(items, 2, 56)}`,
     done: `非功能约束已经回归确认。涉及: ${summarizeTaskItems(items, 2, 72)}。`,
-    verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
     phase: 'verification',
   }));
   const edgeAndFailure = [
@@ -401,7 +403,6 @@ function buildNonFunctionalVerificationTasks(snapshot) {
         type: 'verification',
         title: `回归边界条件与失败处理：${summarizeTaskItems(edgeAndFailure, 2, 56)}`,
         done: `边界条件与失败处理已经回归确认。涉及: ${summarizeTaskItems(edgeAndFailure, 2, 72)}。`,
-        verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
         phase: 'verification',
       }]
     : [];
@@ -430,7 +431,6 @@ function buildTaskItems({ changeId, snapshot, capability }) {
             type: 'verification',
             title: '验证成本与额度护栏',
             done: '已验证免费、试用或低权限用户不能绕过额度、并发、频率或总量限制',
-            verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
             phase: 'verification',
           },
           {
@@ -438,7 +438,6 @@ function buildTaskItems({ changeId, snapshot, capability }) {
             type: 'verification',
             title: '验证滥用与越权路径',
             done: '已覆盖重复请求、并发请求、越权身份和异常恢复等负向场景',
-            verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
             phase: 'verification',
           },
           {
@@ -446,7 +445,6 @@ function buildTaskItems({ changeId, snapshot, capability }) {
             type: 'verification',
             title: '验证成本监控、报警和止损',
             done: '已确认用量或成本信号、报警阈值和人工/自动止损动作可执行',
-            verify: DEFAULT_EXECUTION_VERIFY_COMMAND,
             phase: 'verification',
           },
         ]
@@ -492,15 +490,18 @@ function buildTaskItems({ changeId, snapshot, capability }) {
     deduped.push(item);
   }
 
-  const tasks = deduped.map((item, index) => ({
-    id: `T001.${String(index + 1).padStart(2, '0')}`,
-    title: item.title,
-    type: item.type,
-    phase: item.phase,
-    done: item.done,
-    verify: item.verify ?? (item.type === 'documentation' ? 'openprd standards . --verify' : DEFAULT_EXECUTION_VERIFY_COMMAND),
-    deps: [],
-  }));
+  const tasks = deduped.map((item, index) => {
+    const task = {
+      id: `T001.${String(index + 1).padStart(2, '0')}`,
+      title: item.title,
+      type: item.type,
+      phase: item.phase,
+      done: item.done,
+      deps: [],
+    };
+    task.verify = item.verify ?? defaultTaskVerifyCommand(changeId, task);
+    return task;
+  });
 
   const phaseTasks = {
     governanceStart: tasks.filter((task) => task.phase === 'governance-start'),
@@ -582,6 +583,12 @@ function renderTaskFiles(tasks, maxItemsPerFile) {
       }
       lines.push(`  - done: ${task.done}`);
       lines.push(`  - verify: ${task.verify}`);
+      for (const metadata of formatTaskTestStrategyMetadata(task)) {
+        lines.push(`  - ${metadata}`);
+      }
+      for (const metadata of formatTaskExecutionStrategyMetadata(task)) {
+        lines.push(`  - ${metadata}`);
+      }
       lines.push('');
     }
 
@@ -606,6 +613,12 @@ async function readTaskMax(projectRoot) {
 async function writeDiscoveryConfig(projectRoot, changeId) {
   const configPath = openPrdDiscoveryConfigPath(projectRoot);
   const current = await readJson(configPath).catch(() => ({}));
+  const optionalMetadata = [
+    'deps',
+    'type',
+    ...TEST_STRATEGY_METADATA_KEYS,
+    ...EXECUTION_STRATEGY_METADATA_KEYS,
+  ];
   await writeJson(configPath, {
     ...current,
     activeChange: changeId,
@@ -618,7 +631,7 @@ async function writeDiscoveryConfig(projectRoot, changeId) {
     taskMetadata: {
       stableIdPattern: current?.taskMetadata?.stableIdPattern ?? 'T###.##',
       required: current?.taskMetadata?.required ?? ['done', 'verify'],
-      optional: current?.taskMetadata?.optional ?? ['deps', 'type'],
+      optional: [...new Set([...(current?.taskMetadata?.optional ?? []), ...optionalMetadata])],
       dependencyOrder: current?.taskMetadata?.dependencyOrder ?? 'dependencies must appear before dependents',
     },
   });

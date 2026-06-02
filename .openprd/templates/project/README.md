@@ -2,15 +2,15 @@
 
 简体中文 | [English](./README_EN.md)
 
-这一层用于沉淀项目级的 PRD 调整。
+这一层承载单个项目特有的 PRD 调整与交付约束。
 
-适用场景：
+常见用途：
 
-- 补充 rollout 说明。
-- 补充项目级假设。
-- 补充额外 review gate。
+- 增加 rollout 说明。
+- 增加项目专属假设。
+- 增加额外评审门禁。
 
 规则：
 
-- 必须继承 company 和 core 层。
-- 必须保持 freeze 兼容。
+- 必须继承 company 与 core 层。
+- 必须保持与 freeze 流程兼容。

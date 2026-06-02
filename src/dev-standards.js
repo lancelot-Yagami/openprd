@@ -1,10 +1,14 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cjoin, exists, readJson } from './fs-utils.js';
 import { buildCodeExtensionCandidate, observeGrowthWorkspace } from './growth.js';
 import { recordKnowledgeReviewSignal, reviewKnowledgeWorkspace } from './knowledge.js';
 
 const DEVELOPMENT_STANDARDS_CONFIG = cjoin('.openprd', 'standards', 'config.json');
+const DEV_CHECK_WRAPUP_COPY_SCRIPT = fileURLToPath(new URL('../scripts/dev-check-wrapup-copy.mjs', import.meta.url));
+const DEV_CHECK_WRAPUP_FIELDS = ['规模信号', '预警原因', '本次处理结果', '后续建议'];
 const CODE_FILE_EXTENSIONS = new Set([
   '.c',
   '.cc',
@@ -162,6 +166,7 @@ function normalizeLineConfig(config = {}) {
     exemptPathSegments,
     exemptFilePatterns: [...EXEMPT_FILE_PATTERNS, ...customPatterns],
     growthEnabled: config?.growth?.enabled !== false,
+    growthAutoApply: config?.growth?.autoApply,
   };
 }
 
@@ -208,21 +213,181 @@ function fileStatus(lineCount, lineConfig) {
 
 function nextActionForStatus(status, lineConfig) {
   if (status === 'ok') {
-    return `结构状态正常；最终回复中可简要说明 dev-check 已回顾 touched files。`;
+    return `本轮没有显著维护风险；最终回复可简要说明已回顾本次改动文件。`;
   }
   if (status === 'attention') {
-    return `最终回复说明本轮只触碰的局部职责和影响范围，避免继续新增无关职责。`;
+    return `本轮只做当前目标相关的小范围改动，并说明没有继续扩展该文件职责。`;
   }
   if (status === 'warning') {
-    return `判断本轮是否继续扩大职责或堆叠逻辑；若扩大了，先重构、拆分或解耦后复查；若只是窄 bugfix 或小修且暂不拆，说明原因并留下后续拆分建议。`;
+    return `先判断这次是否新增职责；如果新增了，优先拆分或解耦后再收尾；如果只是小修，说明暂不拆的原因和后续拆分建议。`;
   }
   if (status === 'exempt') {
-    return `豁免治理；只记录行数，不要求拆分。`;
+    return `不纳入本次维护风险判断；只记录行数，不要求拆分。`;
   }
   if (status === 'not-code') {
-    return `不适用；研发期行数规则只约束代码文件。`;
+    return `不适用；维护风险检查只面向代码文件。`;
   }
   return `无法检查；请确认文件路径。`;
+}
+
+function devCheckStatusLabel(status) {
+  if (status === 'ok') return '已检查，无需关注';
+  if (status === 'attention') return '🟡 低风险｜建议留意';
+  if (status === 'warning') return '🟠 中风险｜建议优先关注';
+  if (status === 'exempt') return '不纳入本次判断';
+  if (status === 'not-code') return '不适用';
+  if (status === 'error') return '🔴 高风险｜需要先处理';
+  return String(status || '未知');
+}
+
+function devCheckConcernRank(file) {
+  if (file.status === 'error') return 4;
+  if (file.status === 'warning') return 3;
+  if (file.status === 'attention') return 2;
+  if (file.status === 'ok') return 1;
+  return 0;
+}
+
+function devCheckThresholdText(file) {
+  const thresholds = file.thresholds ?? {};
+  const okMax = thresholds.okMax ?? DEFAULT_DEVELOPMENT_STANDARDS.codeFileLines.okMax;
+  const attentionMax = thresholds.attentionMax ?? DEFAULT_DEVELOPMENT_STANDARDS.codeFileLines.attentionMax;
+  const lineText = file.lineCount === null || file.lineCount === undefined ? '未知行数' : `${file.lineCount} 行`;
+  if (file.status === 'warning') {
+    return `${lineText}；已超过高维护风险线（>${attentionMax} 行）`;
+  }
+  if (file.status === 'attention') {
+    return `${lineText}；已超过建议的单文件舒适区（≤${okMax} 行）`;
+  }
+  return `${lineText}；建议单文件舒适区 ≤${okMax} 行，高维护风险线 >${attentionMax} 行`;
+}
+
+function devCheckReason(file) {
+  const thresholds = file.thresholds ?? {};
+  const okMax = thresholds.okMax ?? DEFAULT_DEVELOPMENT_STANDARDS.codeFileLines.okMax;
+  const attentionMax = thresholds.attentionMax ?? DEFAULT_DEVELOPMENT_STANDARDS.codeFileLines.attentionMax;
+  if (file.status === 'attention') {
+    return `文件已经偏大，继续叠加新职责会提高评审、回归和交接成本；本轮需要说明只改了哪一小块。`;
+  }
+  if (file.status === 'warning') {
+    return `文件已经进入高维护风险区，继续加逻辑容易放大改动范围和回归成本；需要判断是否应先拆分。`;
+  }
+  if (file.status === 'ok') {
+    return `文件规模在建议范围内。`;
+  }
+  if (file.status === 'exempt') {
+    return '命中生成物、依赖、快照或项目配置豁免。';
+  }
+  if (file.status === 'not-code') {
+    return '未识别为代码文件。';
+  }
+  return file.nextAction || '无法完成检查。';
+}
+
+function devCheckSplitIdea(file) {
+  if (file.status === 'attention') {
+    return '后续如果还要继续改这个文件，按入口、状态、渲染或数据处理边界拆出更小模块。';
+  }
+  if (file.status === 'warning') {
+    return '优先把独立职责、测试夹具或输出渲染拆出，降低下一次需求的评审和回归成本。';
+  }
+  if (file.status === 'ok') {
+    return '无需拆分。';
+  }
+  if (file.status === 'exempt') {
+    return '无需拆分，保持豁免原因可追踪。';
+  }
+  if (file.status === 'not-code') {
+    return '不适用研发期代码拆分判断。';
+  }
+  return '先修复检查错误，再重新运行 dev-check。';
+}
+
+function markdownCell(value) {
+  return String(value ?? '')
+    .replace(/\r?\n/g, '<br>')
+    .replace(/\|/g, '\\|');
+}
+
+function renderMarkdownTable(columns, rows) {
+  if (!rows.length) return '';
+  const header = `| ${columns.map(markdownCell).join(' | ')} |`;
+  const divider = `| ${columns.map(() => '---').join(' | ')} |`;
+  const body = rows.map((row) => `| ${columns.map((column) => markdownCell(row[column])).join(' | ')} |`);
+  return [header, divider, ...body].join('\n');
+}
+
+function countDisplayChars(value) {
+  return Array.from(String(value ?? '')).length;
+}
+
+function buildCompactWrapUpRows(files) {
+  const result = spawnSync(process.execPath, [DEV_CHECK_WRAPUP_COPY_SCRIPT], {
+    input: JSON.stringify({
+      files: files.map((file) => ({
+        status: file.status,
+        lineCount: file.lineCount,
+        thresholds: file.thresholds,
+        nextAction: file.nextAction,
+      })),
+    }),
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr?.trim() || result.stdout?.trim() || 'Failed to generate compact dev-check wrap-up copy.');
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(result.stdout || '{}');
+  } catch (error) {
+    throw new Error(`Failed to parse compact dev-check wrap-up copy: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const rows = Array.isArray(payload?.rows) ? payload.rows : null;
+  const limit = Number.isInteger(payload?.limit) ? payload.limit : 20;
+  if (!rows || rows.length !== files.length) {
+    throw new Error('Compact dev-check wrap-up copy returned an unexpected row count.');
+  }
+  for (const row of rows) {
+    for (const field of DEV_CHECK_WRAPUP_FIELDS) {
+      if (typeof row[field] !== 'string') {
+        throw new Error(`Compact dev-check wrap-up copy is missing field: ${field}`);
+      }
+      if (countDisplayChars(row[field]) > limit) {
+        throw new Error(`Compact dev-check wrap-up copy exceeded ${limit} chars for field: ${field}`);
+      }
+    }
+  }
+  return rows;
+}
+
+function buildDevCheckWrapUp(files) {
+  const title = '后续建议';
+  const columns = ['影响对象', '关注程度', '规模信号', '预警原因', '本次处理结果', '后续建议'];
+  const attentionFiles = files
+    .filter((file) => ['attention', 'warning', 'error'].includes(file.status))
+    .sort((left, right) => devCheckConcernRank(right) - devCheckConcernRank(left));
+  const compactRows = attentionFiles.length > 0 ? buildCompactWrapUpRows(attentionFiles) : [];
+  const rows = attentionFiles.map((file, index) => ({
+      影响对象: file.path,
+      关注程度: devCheckStatusLabel(file.status),
+      ...compactRows[index],
+    }));
+  const markdownTable = renderMarkdownTable(columns, rows);
+  return {
+    required: rows.length > 0,
+    reason: rows.length > 0
+      ? '存在需要用户关注的影响对象；最终回复需要用“后续建议”说明本次处理结果和后续建议。'
+      : '本轮改动文件未触发影响范围提醒；最终回复可简要说明已完成改动对象回顾。',
+    title,
+    columns,
+    rows,
+    markdownTable,
+    markdownBlock: markdownTable ? `**${title}**\n\n${markdownTable}` : '',
+  };
 }
 
 async function analyzeDevelopmentFile(projectRoot, targetPath, lineConfig) {
@@ -269,6 +434,7 @@ async function analyzeDevelopmentFile(projectRoot, targetPath, lineConfig) {
   const candidateCode = !codeFile && !exempt && codeSignal.match;
   const status = exempt ? 'exempt' : (codeFile || candidateCode ? fileStatus(lineCount, lineConfig) : 'not-code');
   let growthCandidate = null;
+  let growthObservation = null;
   if (candidateCode) {
     growthCandidate = buildCodeExtensionCandidate(relativePath, {
       lineCount,
@@ -276,18 +442,24 @@ async function analyzeDevelopmentFile(projectRoot, targetPath, lineConfig) {
       reason: codeSignal.reason,
     });
     if (lineConfig.growthEnabled) {
-      await observeGrowthWorkspace(projectRoot, growthCandidate);
+      growthObservation = await observeGrowthWorkspace(projectRoot, growthCandidate, {
+        autoApply: lineConfig.growthAutoApply,
+      });
+      growthCandidate = growthObservation.candidate ?? growthCandidate;
     }
   }
   const baseAction = nextActionForStatus(status, lineConfig);
-  const nextAction = growthCandidate
-    ? `${baseAction} 另外：该扩展名尚未固化为代码文件规则，先按代码候选处理；运行 openprd grow . --review 审查，确认后执行 openprd grow . --apply --id ${growthCandidate.id}。`
+  const nextAction = growthObservation?.autoApplied
+    ? `${baseAction} 另外：已自动补齐 ${growthCandidate.key} 代码文件识别规则，后续同类文件会直接纳入 dev-check。`
+    : growthCandidate
+    ? `${baseAction} 另外：该扩展名尚未固化为代码文件识别规则，先按代码候选处理；本轮收工复盘时运行 openprd grow . --review 集中确认。`
     : baseAction;
 
   return {
     path: relativePath,
     absolutePath,
     status,
+    statusLabel: devCheckStatusLabel(status),
     fileKind: exempt ? 'exempt' : (codeFile ? 'code' : (candidateCode ? 'candidate-code' : 'non-code')),
     lineCount,
     sizeBytes: stat.size,
@@ -296,7 +468,15 @@ async function analyzeDevelopmentFile(projectRoot, targetPath, lineConfig) {
       attentionMax: lineConfig.attentionMax,
     },
     growthCandidate,
+    growthObservation,
     nextAction,
+    wrapUp: ['attention', 'warning'].includes(status)
+      ? {
+        threshold: devCheckThresholdText({ status, lineCount, thresholds: { okMax: lineConfig.okMax, attentionMax: lineConfig.attentionMax } }),
+        reason: devCheckReason({ status, lineCount, thresholds: { okMax: lineConfig.okMax, attentionMax: lineConfig.attentionMax }, nextAction }),
+        splitIdea: devCheckSplitIdea({ status }),
+      }
+      : null,
   };
 }
 
@@ -358,6 +538,7 @@ export async function checkDevelopmentStandardsWorkspace(projectRoot, options = 
       warning: statusCounts.warning ?? 0,
     },
     files,
+    wrapUp: buildDevCheckWrapUp(files),
     knowledgeReview,
     errors,
   };

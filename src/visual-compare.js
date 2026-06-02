@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { compactTimestamp } from './time.js';
+import { VISUAL_REVIEW_SCHEMA } from './quality-visual-review.js';
+import { compactTimestamp, timestamp } from './time.js';
 
 const DEFAULT_PANEL_WIDTH = 1180;
 const DEFAULT_QUALITY = 85;
@@ -10,7 +11,6 @@ const DEFAULT_ACTUAL_LABEL = '实现截图';
 const DEFAULT_BEFORE_LABEL = '修改前';
 const DEFAULT_AFTER_LABEL = '修改后';
 const OUTPUT_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp']);
-
 function normalizeFormat(format, outPath) {
   const requested = String(format || '').trim().toLowerCase();
   if (requested) {
@@ -29,6 +29,15 @@ function normalizeFormat(format, outPath) {
 
 function outputExtension(format) {
   return format === 'jpeg' ? 'jpg' : format;
+}
+
+function toWorkspacePath(projectRoot, filePath) {
+  const absolutePath = path.resolve(filePath);
+  const relativePath = path.relative(projectRoot, absolutePath);
+  if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+    return relativePath.split(path.sep).join('/');
+  }
+  return absolutePath;
 }
 
 function defaultOutputPath(projectRoot, format, mode) {
@@ -59,6 +68,11 @@ function parseQuality(value) {
     throw new Error('--quality must be between 1 and 100.');
   }
   return quality;
+}
+
+function metadataPathForOutput(outputPath) {
+  const ext = path.extname(outputPath);
+  return ext ? outputPath.slice(0, -ext.length) + '.json' : `${outputPath}.json`;
 }
 
 function escapeXml(value) {
@@ -214,6 +228,40 @@ async function visualCompareWorkspace(projectRoot, options = {}) {
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await encodePipeline(canvas, format, quality).toFile(outputPath);
+  const metadataPath = metadataPathForOutput(outputPath);
+  const reviewArtifact = {
+    version: 1,
+    schema: VISUAL_REVIEW_SCHEMA,
+    generatedAt: timestamp(),
+    mode: comparison.mode,
+    outputPath: toWorkspacePath(projectRoot, outputPath),
+    format,
+    labels: {
+      reference: referenceLabel,
+      actual: actualLabel,
+    },
+    reference: {
+      path: toWorkspacePath(projectRoot, referencePanel.source),
+      original: referencePanel.original,
+      rendered: {
+        width: referencePanel.width,
+        height: referencePanel.height,
+      },
+    },
+    actual: {
+      path: toWorkspacePath(projectRoot, actualPanel.source),
+      original: actualPanel.original,
+      rendered: {
+        width: actualPanel.width,
+        height: actualPanel.height,
+      },
+    },
+    canvas: {
+      width: canvasWidth,
+      height: canvasHeight,
+    },
+  };
+  await fs.writeFile(metadataPath, `${JSON.stringify(reviewArtifact, null, 2)}\n`, 'utf8');
 
   return {
     ok: true,
@@ -221,6 +269,7 @@ async function visualCompareWorkspace(projectRoot, options = {}) {
     mode: comparison.mode,
     projectRoot,
     outputPath,
+    metadataPath,
     format,
     quality: format === 'png' ? null : quality,
     maxPanelWidth,
@@ -248,6 +297,7 @@ async function visualCompareWorkspace(projectRoot, options = {}) {
       width: canvasWidth,
       height: canvasHeight,
     },
+    reviewArtifact,
     nextActions: comparison.nextActions,
   };
 }

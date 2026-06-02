@@ -26,6 +26,21 @@ Route to diagram review before freeze if:
 - dependencies or boundaries are important to approval
 - the user explicitly asks for a diagram, flow, or visual explanation
 
+## Visual Direction Gate
+
+Before large UI changes, route to visual direction review after requirement intake and before implementation or PRD freeze if:
+
+- information architecture, core layout, primary visual language, key path, or component hierarchy/density will change substantially
+- the user asks to compare design directions, effect images, mockups, or "先看样子"
+- the change is an existing feature optimization but product judgment is needed before visual implementation
+
+Required artifact:
+
+- current in-product screenshot captured with Codex Computer Use
+- at least three Image 2 image-to-image directions based on that screenshot
+- one horizontal contact sheet under `.openprd/harness/visual-reviews/`, with each option numbered 1/2/3 in the top-left corner
+- explicit user confirmation of the chosen direction before large UI implementation
+
 ## Freeze Gate
 
 Freeze is appropriate when:

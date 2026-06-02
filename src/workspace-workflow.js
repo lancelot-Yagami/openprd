@@ -1,15 +1,16 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { analyzePrdSnapshot, buildPrdSnapshot, diffSnapshots, formatVersionId, renderPrdMarkdown, summarizeSnapshot } from './prd-core.js';
 import { getDiagramReviewState } from './diagram-workspace.js';
 import { exists, parseYamlText, readJson, readText, writeJson, writeText } from './fs-utils.js';
 import { artifactBundlePaths, canonicalReviewPath, defaultReviewArtifactPath, openArtifactInBrowser, renderPlaygroundArtifact, renderPlaygroundMarkdown, renderPlaygroundPatch, renderReviewArtifact, renderReviewEntryHtml, writeHtmlArtifact } from './html-artifacts.js';
-import { findOpenPrdSpecLanguageViolations } from './language-policy.js';
-import { buildSpec as buildOpenSpecSpec } from './openspec/generate.js';
+import { buildReleaseLedgerSummary } from './release-ledger.js';
+import { assertReviewPresentationReady, getReviewPresentationGate } from './review-presentation.js';
 import { syncSessionBindingFromReview, syncSessionBindingFromSnapshot } from './session-binding.js';
 import { timestamp } from './time.js';
 import { generateWorkUnitId, normalizeWorkUnitId, readWorkUnitBinding, resolveTargetRoot, writeWorkUnitBinding } from './work-unit.js';
-import { appendDecision, appendOpenQuestions, appendProgress, appendWorkflowEvent, buildClarificationPlan, buildClarificationState, buildWorkflowTaskGraph, CAPTURE_SOURCES, coerceCapturedValue, deriveGateLabels, detectWorkspaceScenario, extractMarkdownSection, FIELD_PATH_TO_STATE_KEY, isSupportedProductType, loadLatestVersionSnapshot, loadWorkspace, normalizeVersionId, readVersionIndex, readVersionSnapshot, renderFlowDoc, renderHandoffDoc, renderRolesDoc, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace, writeVersionIndex, writeVersionSnapshot } from './workspace-core.js';
+import { appendDecision, appendOpenQuestions, appendProgress, appendWorkflowEvent, buildClarificationPlan, buildClarificationState, buildCurrentStateSnapshot, buildWorkflowTaskGraph, CAPTURE_SOURCES, coerceCapturedValue, deriveGateLabels, detectWorkspaceScenario, extractMarkdownSection, FIELD_PATH_TO_STATE_KEY, isSupportedProductType, loadCurrentLaneSnapshot, loadLatestVersionSnapshot, loadWorkspace, normalizeVersionId, persistWorkspaceCurrentState, readActiveRequirementLane, readVersionIndex, readVersionSnapshot, renderFlowDoc, renderHandoffDoc, renderRolesDoc, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace, writeVersionIndex, writeVersionSnapshot } from './workspace-core.js';
 
 function requirementGatePath(projectRoot) {
   return path.join(projectRoot, '.openprd', 'harness', 'requirement-gate.json');
@@ -23,6 +24,7 @@ const CURRENT_SNAPSHOT_CACHE_KEYS = [
   'sections',
   'content',
   'digest',
+  'reviewPresentationMeta',
 ];
 const REVIEW_PRESENTATION_RELEVANT_FIELD_PREFIXES = [
   'problem.',
@@ -159,8 +161,8 @@ function normalizePrdReviewStatus(status) {
 }
 
 async function readActiveRequirementGate(projectRoot) {
-  const gate = await readJson(requirementGatePath(projectRoot)).catch(() => null);
-  return gate?.active ? gate : null;
+  const lane = await readActiveRequirementLane(projectRoot).catch(() => null);
+  return lane?.gate?.active ? lane.gate : null;
 }
 
 function meaningfulOverrideValue(value) {
@@ -227,7 +229,11 @@ function resolveReviewPaths(ws, snapshot) {
 }
 
 async function writeReviewFiles(ws, snapshot, { writeEntry = true } = {}) {
-  const reviewHtml = renderReviewArtifact({ snapshot });
+  assertReviewPresentationReady(snapshot);
+  const reviewHtml = renderReviewArtifact({
+    snapshot,
+    projectRelease: buildReleaseLedgerSummary(ws.data.releaseLedger),
+  });
   const { canonicalReview, activeReviewEntry } = resolveReviewPaths(ws, snapshot);
   await writeHtmlArtifact(canonicalReview, reviewHtml);
   if (writeEntry) {
@@ -241,6 +247,13 @@ async function writeReviewFiles(ws, snapshot, { writeEntry = true } = {}) {
     canonicalReview,
     activeReviewEntry: writeEntry ? activeReviewEntry : null,
   };
+}
+
+async function removeReviewFiles(reviewFiles) {
+  await Promise.all([
+    reviewFiles.canonicalReview ? fs.rm(reviewFiles.canonicalReview, { force: true }) : null,
+    reviewFiles.activeReviewEntry ? fs.rm(reviewFiles.activeReviewEntry, { force: true }) : null,
+  ].filter(Boolean));
 }
 
 function shouldUseCurrentDraftForGuidance(currentState) {
@@ -280,8 +293,10 @@ function shouldDropInheritedReviewPresentationFromOverrides(overrides) {
 
 function dropInheritedReviewPresentation(currentState) {
   delete currentState.reviewPresentation;
+  delete currentState.reviewPresentationMeta;
   if (currentState.captureMeta && typeof currentState.captureMeta === 'object' && !Array.isArray(currentState.captureMeta)) {
     delete currentState.captureMeta.reviewPresentation;
+    delete currentState.captureMeta.reviewPresentationMeta;
   }
   return currentState;
 }
@@ -294,6 +309,7 @@ function syncCurrentSnapshotCache(currentState, snapshot) {
   currentState.sections = snapshot.sections;
   currentState.content = snapshot.content;
   currentState.digest = snapshot.digest;
+  currentState.reviewPresentationMeta = snapshot.reviewPresentationMeta ?? null;
   return currentState;
 }
 
@@ -341,24 +357,6 @@ function markReviewStateStaleAfterCapture(currentState, applied, capturedAt) {
 function requirementLooksLikeInterfaceWork(gate) {
   const text = `${gate?.promptPreview ?? ''} ${JSON.stringify(gate?.intent ?? {})}`;
   return /界面|页面|菜单|入口|按钮|表单|弹窗|导航|布局|看板|列表|配置页|模块|组件|UI|tab/i.test(text);
-}
-
-function assertOpenSpecPreflightReady(snapshot) {
-  const specText = buildOpenSpecSpec({ snapshot });
-  const violations = findOpenPrdSpecLanguageViolations(specText);
-  if (violations.length === 0) {
-    return;
-  }
-  const examples = violations
-    .slice(0, 3)
-    .map((violation) => `第 ${violation.line} 行：${violation.reason}（${violation.text}）`)
-    .join('；');
-  throw new Error([
-    'OpenPrd 已阻止 synthesize：按当前 PRD 生成的 spec.md 仍会触发简体中文预检，review.html 还不能进入确认。',
-    '请先把标题、问题陈述和场景文案整理成可直接产出 spec 的简体中文表达。',
-    '如果只是内部措辞规范化，请先用 openprd capture . --source agent-normalized 写回，再重新 synthesize。',
-    examples ? `示例：${examples}。` : null,
-  ].filter(Boolean).join(' '));
 }
 
 function requirementPrompt(gate) {
@@ -436,6 +434,110 @@ function shortList(items, fallback = '待补充') {
   return list.length > 0 ? list.slice(0, 3).join('；') : fallback;
 }
 
+function normalizeTextList(items) {
+  if (Array.isArray(items)) {
+    return items.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  const text = String(items || '').trim();
+  return text ? [text] : [];
+}
+
+function summarizeProductShape(productType, gate) {
+  if (productType === 'consumer') {
+    return '当前更像面向个人用户或 C 端体验的产品。';
+  }
+  if (productType === 'b2b') {
+    return '当前更像面向团队、企业或后台流程的产品。';
+  }
+  if (productType === 'agent') {
+    return '当前更像面向 Agent、自动化或人机协作的产品。';
+  }
+  const text = requirementPrompt(gate);
+  if (/agent|自动化|workflow|MCP|tool|skill/i.test(text)) {
+    return '从当前描述看，更像 Agent、自动化或人机协作方向。';
+  }
+  if (/企业|团队|后台|审批|权限|客户|运营/i.test(text)) {
+    return '从当前描述看，更像团队、企业或后台流程方向。';
+  }
+  if (/个人|用户|社区|内容|创作者|消费|c端|to c/i.test(text)) {
+    return '从当前描述看，更像个人用户或 C 端体验方向。';
+  }
+  return '产品形态仍待确认，可在 consumer / b2b / agent 之间进一步锁定。';
+}
+
+function summarizeArchitectureSignals(gate, snapshot) {
+  const sections = snapshot.sections ?? {};
+  const text = `${requirementPrompt(gate)} ${JSON.stringify({
+    technical: sections.constraints?.technical ?? [],
+    dependencies: sections.constraints?.dependencies ?? [],
+  })}`;
+  const hits = [];
+  if (/前端|页面|客户端|web|h5|移动端|ios|android|桌面|ui|交互/i.test(text)) {
+    hits.push('前端或客户端体验');
+  }
+  if (/后端|服务端|server|api|数据库|存储|队列|定时任务|cron|webhook/i.test(text)) {
+    hits.push('后端或数据服务');
+  }
+  if (/agent|workflow|tool|skill|MCP|自动化|编排/i.test(text)) {
+    hits.push('Agent 或工具链协作');
+  }
+  return hits.length > 0
+    ? hits.join('；')
+    : '技术落点仍待确认，可先按前端 / 后端 / Agent 协作边界补齐。';
+}
+
+function collectProjectRiskProbes(gate, snapshot) {
+  const sections = snapshot.sections ?? {};
+  const text = `${requirementPrompt(gate)} ${JSON.stringify({
+    users: sections.users ?? {},
+    constraints: sections.constraints ?? {},
+    requirements: sections.requirements ?? {},
+  })}`;
+  const probes = [];
+  const probeMap = [
+    { label: '登录 / 账号 / 权限', pattern: /登录|账号|auth|oauth|权限|角色|rbac/i },
+    { label: '用户数据 / 存储 / 隐私', pattern: /数据|数据库|存储|隐私|文件|上传|下载|同步/i },
+    { label: '多人协作 / 审批 / 组织', pattern: /团队|协作|审批|组织|成员|管理员|buyer|admin/i },
+    { label: '外部服务 / API / 集成', pattern: /第三方|外部|api|sdk|集成|webhook|支付|短信/i },
+    { label: 'AI / Agent / 模型调用', pattern: /ai|agent|模型|llm|生成|推理|prompt/i },
+    { label: '收费 / 额度 / 成本', pattern: /收费|订阅|付费|价格|额度|点数|积分|成本|quota|billing/i },
+  ];
+  for (const probe of probeMap) {
+    if (probe.pattern.test(text)) {
+      probes.push(probe.label);
+    }
+  }
+  return probes;
+}
+
+function buildProjectFraming({ gate, snapshot, scenario, productType }) {
+  const sections = snapshot.sections ?? {};
+  const guardrailHints = [
+    ...normalizeTextList(sections.requirements?.businessRules),
+    ...normalizeTextList(sections.constraints?.dependencies),
+  ];
+  const riskProbes = collectProjectRiskProbes(gate, snapshot);
+  return {
+    audience: shortList(
+      sections.users?.primaryUsers,
+      scenario.id === 'cold-start-existing-project'
+        ? '需要先确认这次改动主要服务谁。'
+        : '需要先确认目标用户或关键角色。'
+    ),
+    productShape: summarizeProductShape(productType, gate),
+    firstSlice: shortList(sections.scope?.inScope, '需要先确认第一版最小可用切片。'),
+    nonGoals: shortList(sections.scope?.outOfScope, '需要先确认本轮先不做什么。'),
+    guardrails: shortList(guardrailHints, '需要先确认哪些现有能力、数据、流程或体验不能被破坏。'),
+    architectureSignals: summarizeArchitectureSignals(gate, snapshot),
+    riskProbes,
+    riskProbeSummary: shortList(riskProbes, '当前没有明显命中额外风险探针。'),
+  };
+}
+
+function escapeMarkdownTableCell(value) {
+  return String(value ?? '').replace(/\|/g, '/');
+}
+
 function normalizeClarifyMode(mode) {
   if (mode === 'artifact') {
     return 'inline-with-checklist';
@@ -444,8 +546,15 @@ function normalizeClarifyMode(mode) {
 }
 
 function estimateInlineClarificationLines(clarification, reflection) {
+  const projectFraming = reflection?.projectContext?.projectFraming ?? null;
   const activeChangeLines = reflection?.projectContext?.activeChange ? 1 : 0;
-  return 4
+  const framingLines = projectFraming
+    ? 5
+      + (projectFraming.architectureSignals ? 1 : 0)
+      + (projectFraming.riskProbes?.length > 0 ? 1 : 0)
+    : 0;
+  return 2
+    + framingLines
     + clarification.mustAskUser.length
     + Math.min(clarification.canInferLater.length, 2)
     + activeChangeLines;
@@ -484,12 +593,22 @@ function buildInlineClarification({ clarification, reflection, presentation }) {
   }
   const prompt = reflection?.promptPreview || '本轮需求';
   const projectContext = reflection?.projectContext ?? {};
+  const projectFraming = projectContext.projectFraming ?? {};
   const lines = [
     `我理解的目标：${prompt}`,
     `落点：${projectContext.productName ?? '当前项目'}；按${projectContext.scenario ?? '当前工作区'}处理。`,
-    '范围边界：只处理本轮需求，不自动合并历史 active change 或未提到的扩展。',
-    '验收方式：确认用户能看到或完成的结果，以及哪些既有行为不能被改变。',
+    `适用对象：${projectFraming.audience ?? '待确认'}；产品形态：${projectFraming.productShape ?? '待确认'}`,
+    `第一版先做：${projectFraming.firstSlice ?? '待确认'}`,
+    `先不做：${projectFraming.nonGoals ?? '待确认'}`,
+    `不能破坏：${projectFraming.guardrails ?? '待确认'}`,
   ];
+  if (projectFraming.architectureSignals) {
+    lines.push(`技术落点：${projectFraming.architectureSignals}`);
+  }
+  if (projectFraming.riskProbes?.length > 0) {
+    lines.push(`额外关注：${projectFraming.riskProbeSummary}`);
+  }
+  lines.push('验收方式：确认用户能看到或完成的结果，以及哪些既有行为不能被改变。');
   if (projectContext.activeChange) {
     lines.push(`历史提醒：当前还有 ${projectContext.activeChange.activeChange}，本轮先分开处理。`);
   }
@@ -533,33 +652,57 @@ function reflectionQuestion(id, label, prompt) {
   };
 }
 
+function shouldBuildRequirementIntakeReflection({ gate, scenario, analysis }) {
+  if (gate?.active) {
+    return true;
+  }
+  if (['cold-start-greenfield', 'cold-start-existing-project'].includes(scenario?.id)) {
+    return true;
+  }
+  return Number(analysis?.missingRequiredFields ?? 0) > 0;
+}
+
 async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, analysis, scenario, gate }) {
-  if (!gate?.active) {
+  if (!shouldBuildRequirementIntakeReflection({ gate, scenario, analysis })) {
     return null;
   }
 
+  const sections = snapshot.sections ?? {};
   const text = requirementPrompt(gate);
+  const promptPreview = text || sections.problem?.problemStatement || snapshot.title || '当前需求待确认';
   const complexity = detectRequirementIntakeComplexity(gate);
   const activeChange = await readActiveChangeHint(projectRoot);
-  const sections = snapshot.sections ?? {};
   const productName = snapshot.title || sections.meta?.title || '当前项目';
   const productType = snapshot.productType ?? resolveCurrentProductType(ws) ?? '未分类';
   const currentProblem = sections.problem?.problemStatement || '待补充';
   const currentScope = shortList(sections.scope?.inScope, '当前范围还没有稳定记录');
   const missing = analysis.missingFields.slice(0, 4).map((field) => field.label);
   const needsInterfaceSketch = requirementLooksLikeInterfaceWork(gate);
+  const projectFraming = buildProjectFraming({
+    gate,
+    snapshot,
+    scenario,
+    productType: snapshot.productType ?? resolveCurrentProductType(ws),
+  });
+  const needsDeliveryShapeQuestion = !needsInterfaceSketch
+    && (
+      projectFraming.riskProbes.length > 0
+      || !projectFraming.architectureSignals.includes('仍待确认')
+    );
   const mustConfirm = complexity.mode === 'deep'
     ? [
-        reflectionQuestion('intent', '意图与目标', '请确认我对需求目标的理解：目标用户是谁、在哪个场景下，需要完成什么结果？'),
-        reflectionQuestion('project-context', '项目影响范围', '结合当前项目，哪些已有模块、入口、流程或历史需求必须复用，哪些可以调整？'),
-        reflectionQuestion('scope-quality', '范围与验收', '这个需求的范围内、范围外、成功标准和失败路径分别是什么？'),
+        reflectionQuestion('intent', '意图与目标', '请确认我对需求目标的理解：它是给谁用的、属于哪类产品（个人 / 团队 / Agent 协作）、在哪个场景下需要完成什么结果？'),
+        reflectionQuestion('project-context', '项目影响范围', '结合当前项目，请确认第一版最小可用切片是什么；哪些已有模块、入口、流程或历史需求必须复用，哪些可以调整？'),
+        reflectionQuestion('scope-quality', '范围与验收', '请确认这次先做什么、不做什么、哪些既有能力不能被破坏，以及成功标准和失败路径分别是什么。'),
         needsInterfaceSketch
           ? reflectionQuestion('interface-sketch', '界面或流程草图', '需求涉及界面或流程，请先确认主要区域、操作入口、预览/确认点和风险提示。')
-          : reflectionQuestion('details-boundary', '细节与边界', '请确认关键字段、状态变化、数据来源、权限边界和可验收细节。'),
+          : needsDeliveryShapeQuestion
+            ? reflectionQuestion('delivery-shape', '交付形态与技术边界', '请确认这次需要前端、后端、数据/账号、外部服务、AI/Agent 或多人协作中的哪些部分，各自边界和最关键风险是什么。')
+            : reflectionQuestion('details-boundary', '细节与边界', '请确认关键字段、状态变化、数据来源、权限边界和可验收细节。'),
       ]
     : [
-        reflectionQuestion('project-context', '项目映射', '请确认这个调整具体落在哪个页面、模块、入口或流程，以及哪些已有行为不能被改变。'),
-        reflectionQuestion('acceptance', '验收方式', '请确认完成后用户能看到或做到什么，以及最小验收标准是什么。'),
+        reflectionQuestion('project-context', '项目映射', '请确认这个调整具体落在哪个页面、模块、入口或流程，以及第一版先做哪一小块。'),
+        reflectionQuestion('acceptance', '验收方式', '请确认完成后用户能看到或做到什么、哪些既有行为不能改变，以及最小验收标准是什么。'),
       ];
 
   return {
@@ -569,7 +712,7 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
     label: complexity.label,
     minimumDepth: complexity.minimumDepth,
     questionLimit: gateQuestionLimit(gate, complexity.questionLimit),
-    promptPreview: text,
+    promptPreview,
     reasons: complexity.reasons,
     needsInterfaceSketch,
     projectContext: {
@@ -581,15 +724,16 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
       currentScope,
       activeChange,
       missingFields: missing,
+      projectFraming,
     },
     rounds: [
       {
         id: 'intent-normalization',
         title: '第 1 轮：意图归一化',
         findings: [
-          `用户原始输入：${text || '待补充'}`,
+          `用户原始输入：${promptPreview}`,
           `初步判断：${complexity.label}`,
-          `需要先把表达收敛成用户、场景、目标、动作和期望结果。`,
+          `需要先把表达收敛成用户、产品形态、场景、目标、动作和期望结果。`,
         ],
       },
       {
@@ -599,6 +743,7 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
           `工作区场景：${scenario.label}，${scenario.reason}`,
           `当前产品：${productName}（${productType}），已记录问题：${currentProblem}`,
           `当前范围线索：${currentScope}`,
+          `首轮画像：用户群体=${projectFraming.audience}；产品形态=${projectFraming.productShape}；第一版先做=${projectFraming.firstSlice}`,
           activeChange ? `仍有 active change：${activeChange.activeChange}（${activeChange.status}），需要和本轮需求分开评估。` : '当前没有检测到 active change 冲突。',
         ],
       },
@@ -607,7 +752,9 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
         title: '第 3 轮：产品质量自检',
         findings: [
           `仍需确认的信息：${shortList(missing, '暂无明显缺口')}`,
-          needsInterfaceSketch ? '需求看起来涉及界面或流程，需要先给用户确认草图或关键操作路径。' : '需求暂未明显命中界面，但仍要确认状态、边界和验收方式。',
+          `边界与约束：先不做=${projectFraming.nonGoals}；不能破坏=${projectFraming.guardrails}`,
+          needsInterfaceSketch ? '需求看起来涉及界面或流程，需要先给用户确认草图或关键操作路径。' : `技术落点：${projectFraming.architectureSignals}`,
+          `风险探针：${projectFraming.riskProbeSummary}`,
           '进入实现前必须保留范围、非目标、异常路径和验收证据。',
         ],
       },
@@ -634,6 +781,18 @@ function renderRequirementIntakeReflection(reflection) {
     `- 当前问题: ${reflection.projectContext.currentProblem}`,
     `- 当前范围: ${reflection.projectContext.currentScope}`,
     reflection.projectContext.activeChange ? `- 历史 active change: ${reflection.projectContext.activeChange.activeChange}` : '- 历史 active change: 无',
+    '',
+    '## 首轮项目画像',
+    '',
+    '| 模块 | 当前理解 |',
+    '|---|---|',
+    `| 用户群体 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.audience ?? '待补充')} |`,
+    `| 产品形态 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.productShape ?? '待补充')} |`,
+    `| 第一版先做 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.firstSlice ?? '待补充')} |`,
+    `| 暂不处理 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.nonGoals ?? '待补充')} |`,
+    `| 不能破坏 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.guardrails ?? '待补充')} |`,
+    `| 技术落点 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.architectureSignals ?? '待补充')} |`,
+    `| 风险探针 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.riskProbeSummary ?? '待补充')} |`,
     '',
   ];
   for (const round of reflection.rounds) {
@@ -663,9 +822,9 @@ async function writeRequirementIntakeReflection(ws, reflection) {
 function buildRequirementIntakeDepth(gate, reflection = null) {
   const needsInterfaceSketch = requirementLooksLikeInterfaceWork(gate);
   const fallbackLayers = [
-    reflectionQuestion('product-context', '用户 / 场景 / 问题', '先确认：什么用户，在什么场景下，遇到什么问题？为什么现在值得解决？'),
-    reflectionQuestion('product-outcome', '目标 / 影响 / 成功标准', '解决后用户能完成什么？减少什么成本或风险？用什么成功指标或验收标准判断有效？'),
-    reflectionQuestion('product-flow', '现状流程 / 目标流程 / 异常路径', '请拆出当前流程、目标流程、关键决策点、失败路径，以及哪些动作必须由用户确认。'),
+    reflectionQuestion('product-context', '用户 / 产品形态 / 问题', '先确认：这是给谁用的、它更像个人产品 / 团队流程 / Agent 协作中的哪一种、为什么现在值得解决？'),
+    reflectionQuestion('product-outcome', '第一版切片 / 目标 / 成功标准', '请确认第一版最小可用切片是什么；解决后用户先能完成什么，用什么成功指标或验收标准判断有效？'),
+    reflectionQuestion('product-flow', '范围 / 非目标 / 异常路径', '请拆出本轮先做什么、不做什么、哪些既有行为不能被破坏，以及关键失败路径和恢复方式。'),
     reflectionQuestion(
       'product-detail',
       needsInterfaceSketch ? '界面草图 / 字段 / 状态' : '细节 / 状态 / 边界',
@@ -773,7 +932,10 @@ async function getPrdReviewState(ws, latestSnapshot = null) {
     : (artifactExists ? 'pending-confirmation' : 'missing');
   let reason = '最新 PRD 评审产物已确认。';
   if (!artifactExists) {
-    reason = '缺少最新 PRD 评审文件，freeze 前需要重新生成可评审产物。';
+    const presentationGate = latestSnapshot ? getReviewPresentationGate(latestSnapshot) : null;
+    reason = presentationGate && !presentationGate.ok
+      ? '缺少已通过脚本校验的评审展示文案，先运行 openprd review-presentation 写入后再生成可确认评审页。'
+      : '缺少最新 PRD 评审文件，freeze 前需要重新生成可评审产物。';
   } else if (status === 'pending-confirmation') {
     reason = '最新 PRD 评审文件尚未标记为用户已确认。';
   } else if (status === 'needs-revision') {
@@ -833,7 +995,6 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
 
   snapshot.content = renderPrdMarkdown(snapshot);
   snapshot.digest = crypto.createHash('sha256').update(snapshot.content).digest('hex');
-  assertOpenSpecPreflightReady(snapshot);
 
   await writeVersionSnapshot(ws, snapshot);
 
@@ -844,14 +1005,24 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
   await writeText(ws.paths.activeFlows, renderFlowDoc(snapshot));
   await writeText(ws.paths.activeRoles, renderRolesDoc(snapshot));
   await writeText(ws.paths.activeHandoff, renderHandoffDoc(snapshot));
-  const reviewFiles = await writeReviewFiles(ws, snapshot);
+  const presentationGate = getReviewPresentationGate(snapshot);
+  const reviewFiles = presentationGate.ok
+    ? await writeReviewFiles(ws, snapshot)
+    : {
+        canonicalReview: canonicalReviewPath(ws, snapshot.versionId),
+        activeReviewEntry: defaultReviewArtifactPath(ws),
+      };
+  if (!presentationGate.ok) {
+    await removeReviewFiles(reviewFiles);
+    reviewFiles.activeReviewEntry = null;
+  }
   const workUnit = await writeWorkUnitBinding(ws, {
     snapshot,
     reviewPath: reviewFiles.canonicalReview,
     activeReviewPath: reviewFiles.activeReviewEntry,
     targetRoot,
   });
-  if (overrides.open) {
+  if (overrides.open && presentationGate.ok) {
     await openArtifactInBrowser(reviewFiles.canonicalReview);
   }
   await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(snapshot));
@@ -859,7 +1030,8 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
     versionId: snapshot.versionId,
     versionNumber: snapshot.versionNumber,
     productType: snapshot.productType,
-    reviewArtifact: reviewFiles.canonicalReview,
+    reviewArtifact: presentationGate.ok ? reviewFiles.canonicalReview : null,
+    reviewPresentationRequired: !presentationGate.ok,
   });
   await appendDecision(ws, [
     `已生成版本 ${snapshot.versionId}。`,
@@ -870,6 +1042,9 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
   await appendProgress(ws, [
     `已生成 PRD 快照 ${snapshot.versionId}。`,
     `已更新当前 PRD、流程、角色和交接文档。`,
+    presentationGate.ok
+      ? `已生成可确认评审面板: ${reviewFiles.canonicalReview}。`
+      : '评审面板暂未生成：需要先通过 openprd review-presentation 写入展示文案。',
   ]);
 
   const currentState = syncCurrentSnapshotCache({
@@ -905,8 +1080,8 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
     templatePack: snapshot.templatePack,
     synthesizedAt: snapshot.createdAt,
   }, snapshot);
-  await writeJson(ws.paths.currentState, currentState);
-  const nextWs = { ...ws, data: { ...ws.data, currentState } };
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
+  const nextWs = { ...ws, data: { ...ws.data, currentState: storedCurrentState } };
   await syncSessionBindingFromSnapshot(projectRoot, snapshot, {
     reviewStatus: 'pending-confirmation',
     reviewPath: reviewFiles.canonicalReview,
@@ -917,16 +1092,18 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
   return {
     ws: nextWs,
     snapshot,
-    currentState,
+    currentState: storedCurrentState,
     indexEntry,
     versionIndex: [...versionIndex, indexEntry],
     reviewArtifact: reviewFiles.activeReviewEntry,
     stableReviewArtifact: reviewFiles.canonicalReview,
     reviewPath: reviewFiles.canonicalReview,
     reviewEntryPath: reviewFiles.activeReviewEntry,
+    reviewPresentationRequired: !presentationGate.ok,
+    reviewPresentationGate: presentationGate,
     workUnitId: snapshot.workUnitId,
     workUnit,
-    opened: Boolean(overrides.open),
+    opened: Boolean(overrides.open && presentationGate.ok),
   };
 }
 
@@ -970,7 +1147,7 @@ async function reviewWorkspace(projectRoot, options = {}) {
   if (!(await exists(ws.workspaceRoot))) {
     throw new Error(`Missing workspace: ${ws.workspaceRoot}`);
   }
-  const latest = await loadLatestVersionSnapshot(ws);
+  const latest = await loadCurrentLaneSnapshot(ws, { fallbackToLatest: !ws.data.currentSessionId });
   if (!latest?.snapshot) {
     return {
       ok: false,
@@ -1026,6 +1203,20 @@ async function reviewWorkspace(projectRoot, options = {}) {
   }
 
   const isLatest = normalizeVersionId(snapshot.versionId) === normalizeVersionId(latest.snapshot.versionId);
+  const presentationGate = getReviewPresentationGate(snapshot);
+  if (!presentationGate.ok) {
+    return {
+      ok: false,
+      action: 'review',
+      projectRoot,
+      versionId: snapshot.versionId,
+      workUnitId: snapshot.workUnitId ?? null,
+      status: 'blocked',
+      errors: presentationGate.errors,
+      presentationFeedback: presentationGate.violations,
+      requiredCommand: presentationGate.requiredCommand,
+    };
+  }
   const reviewFiles = await writeReviewFiles(ws, snapshot, { writeEntry: isLatest });
   const bindingBefore = await readWorkUnitBinding(ws, snapshot.workUnitId);
   const before = isLatest
@@ -1059,7 +1250,7 @@ async function reviewWorkspace(projectRoot, options = {}) {
           notes: options.notes ?? null,
         },
       };
-      await writeJson(ws.paths.currentState, currentState);
+      await persistWorkspaceCurrentState(ws, currentState);
     }
     workUnit = await writeWorkUnitBinding(ws, {
       snapshot,
@@ -1127,16 +1318,8 @@ async function clarifyWorkspace(projectRoot, options = {}) {
 
   const versionIndex = await readVersionIndex(ws);
   const currentState = ws.data.currentState ?? {};
-  const snapshot = (await loadLatestVersionSnapshot(ws))?.snapshot ?? buildPrdSnapshot(ws, {
-    ...currentState,
-    versionNumber: currentState.prdVersion ?? (versionIndex.at(-1)?.versionNumber ?? 0),
-    versionId: currentState.prdVersion > 0
-      ? formatVersionId(currentState.prdVersion)
-      : (versionIndex.at(-1)?.versionId ?? 'v0000'),
-    productType: resolveCurrentProductType(ws),
-    templatePack: resolveActiveTemplatePack(ws),
-    status: currentState.status ?? 'draft',
-  });
+  const snapshot = (await loadCurrentLaneSnapshot(ws, { fallbackToLatest: !ws.data.currentSessionId }))?.snapshot
+    ?? buildCurrentStateSnapshot(ws, currentState, versionIndex);
 
   const analysis = analyzePrdSnapshot(snapshot);
   const basePlan = buildClarificationPlan(snapshot, analysis);
@@ -1210,16 +1393,8 @@ async function playgroundWorkspace(projectRoot, options = {}) {
 
   const versionIndex = await readVersionIndex(ws);
   const currentState = ws.data.currentState ?? {};
-  const snapshot = (await loadLatestVersionSnapshot(ws))?.snapshot ?? buildPrdSnapshot(ws, {
-    ...currentState,
-    versionNumber: currentState.prdVersion ?? (versionIndex.at(-1)?.versionNumber ?? 0),
-    versionId: currentState.prdVersion > 0
-      ? formatVersionId(currentState.prdVersion)
-      : (versionIndex.at(-1)?.versionId ?? 'v0000'),
-    productType: resolveCurrentProductType(ws),
-    templatePack: resolveActiveTemplatePack(ws),
-    status: currentState.status ?? 'draft',
-  });
+  const snapshot = (await loadCurrentLaneSnapshot(ws, { fallbackToLatest: !ws.data.currentSessionId }))?.snapshot
+    ?? buildCurrentStateSnapshot(ws, currentState, versionIndex);
 
   const state = buildPlaygroundState(snapshot);
   const bundle = artifactBundlePaths(ws, `${snapshot.versionId}-playground`);
@@ -1386,18 +1561,18 @@ async function captureWorkspace(projectRoot, options = {}) {
     };
   }
   const staleReview = markReviewStateStaleAfterCapture(currentState, applied, currentState.lastCapturedAt);
-  await writeJson(ws.paths.currentState, currentState);
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
 
-  const snapshot = buildPrdSnapshot({ ...ws, data: { ...ws.data, currentState } }, {
-    ...currentState,
-    versionNumber: currentState.prdVersion ?? 0,
-    versionId: currentState.prdVersion > 0 ? formatVersionId(currentState.prdVersion) : 'v0000',
-    productType: currentState.productType ?? resolveCurrentProductType(ws),
-    templatePack: currentState.templatePack ?? resolveActiveTemplatePack(ws),
+  const snapshot = buildPrdSnapshot({ ...ws, data: { ...ws.data, currentState: storedCurrentState } }, {
+    ...storedCurrentState,
+    versionNumber: storedCurrentState.prdVersion ?? 0,
+    versionId: storedCurrentState.prdVersion > 0 ? formatVersionId(storedCurrentState.prdVersion) : 'v0000',
+    productType: storedCurrentState.productType ?? resolveCurrentProductType(ws),
+    templatePack: storedCurrentState.templatePack ?? resolveActiveTemplatePack(ws),
   });
   const analysis = analyzePrdSnapshot(snapshot);
-  const diagramState = await getDiagramReviewState({ ...ws, data: { ...ws.data, currentState } }, snapshot);
-  const updatedWs = { ...ws, data: { ...ws.data, currentState } };
+  const diagramState = await getDiagramReviewState({ ...ws, data: { ...ws.data, currentState: storedCurrentState } }, snapshot);
+  const updatedWs = { ...ws, data: { ...ws.data, currentState: storedCurrentState } };
   const scenario = await detectWorkspaceScenario(projectRoot, updatedWs, await readVersionIndex(ws));
   const requirementGate = await readActiveRequirementGate(projectRoot);
   const intakeReflection = await buildRequirementIntakeReflection({
@@ -1415,7 +1590,7 @@ async function captureWorkspace(projectRoot, options = {}) {
     analysis,
     basePlan: buildClarificationPlan(snapshot, analysis),
     scenario,
-    captureMeta: currentState.captureMeta,
+    captureMeta: storedCurrentState.captureMeta,
     prdReviewState,
     limit: 8,
   }), requirementGate, intakeReflection);
@@ -1433,7 +1608,7 @@ async function captureWorkspace(projectRoot, options = {}) {
   ]);
 
   return {
-    ws: { ...ws, data: { ...ws.data, currentState } },
+    ws: { ...ws, data: { ...ws.data, currentState: storedCurrentState } },
     applied,
     artifactMarkdown: options.artifactMarkdown ?? null,
     field: applied[0]?.field ?? null,
@@ -1449,16 +1624,12 @@ async function computeWorkspaceGuidance(ws, options = {}) {
   const currentState = ws.data.currentState ?? {};
   const currentProductType = resolveCurrentProductType(ws);
   const currentStatus = currentState.status ?? 'unknown';
-  const latestVersion = versionIndex.length > 0 ? await loadLatestVersionSnapshot(ws) : null;
-  const currentDraftSnapshot = buildPrdSnapshot(ws, {
+  const latestVersion = await loadCurrentLaneSnapshot(ws, { fallbackToLatest: !ws.data.currentSessionId });
+  const currentDraftSnapshot = buildCurrentStateSnapshot(ws, {
     ...currentState,
-    versionNumber: currentState.prdVersion ?? (versionIndex.at(-1)?.versionNumber ?? 0),
-    versionId: currentState.prdVersion > 0
-      ? formatVersionId(currentState.prdVersion)
-      : (versionIndex.at(-1)?.versionId ?? 'v0000'),
     productType: currentProductType,
     templatePack: resolveActiveTemplatePack(ws),
-  });
+  }, versionIndex);
   const analysisSnapshot = shouldUseCurrentDraftForGuidance(currentState)
     ? currentDraftSnapshot
     : (latestVersion?.snapshot ?? currentDraftSnapshot);
@@ -1529,7 +1700,9 @@ async function computeWorkspaceGuidance(ws, options = {}) {
     reason = prdReviewState.reason;
     suggestedCommand = prdReviewState.artifactExists
       ? 'openprd review . --open'
-      : 'openprd synthesize . --open';
+      : (prdReviewState.reason.includes('review-presentation')
+          ? 'openprd review-presentation . --template'
+          : 'openprd synthesize . --open');
     suggestedQuestions = [
       '这份 PRD 的问题、目标、范围、主流程、失败路径和风险是否符合你的理解？',
       '如果已经确认，请运行 openprd review . --mark confirmed；如果需要修改，请运行 openprd review . --mark needs-revision。',
@@ -1659,7 +1832,7 @@ async function classifyWorkspace(projectRoot, productType) {
     templatePack: productType,
     classifiedAt: timestamp(),
   };
-  await writeJson(ws.paths.currentState, currentState);
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
   await appendWorkflowEvent(ws, 'classified', { productType });
   await appendDecision(ws, [
     `已锁定产品类型为 ${productType}。`,
@@ -1668,9 +1841,9 @@ async function classifyWorkspace(projectRoot, productType) {
   await appendProgress(ws, [
     `已将工作区分类为 ${productType}。`,
   ]);
-  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(currentState));
+  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(storedCurrentState));
 
-  return { ws, currentState };
+  return { ws: { ...ws, data: { ...ws.data, currentState: storedCurrentState } }, currentState: storedCurrentState };
 }
 
 async function interviewWorkspace(projectRoot, requestedType = null) {
@@ -1705,7 +1878,7 @@ ${content}`);
     templatePack: productType ?? resolveActiveTemplatePack(ws),
     interviewStartedAt: timestamp(),
   };
-  await writeJson(ws.paths.currentState, currentState);
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
   await appendWorkflowEvent(ws, 'interview_started', {
     productType: currentState.productType,
     sourceFiles: sourceFiles.map((filePath) => path.relative(ws.workspaceRoot, filePath)),
@@ -1716,19 +1889,19 @@ ${content}`);
   ]);
   await appendOpenQuestions(ws, [
     '我们要解决什么问题？',
-    '主要用户是谁？',
-    '成功是什么样？',
-    '哪些内容明确不在范围内？',
-    '我们希望 freeze 的第一个里程碑是什么？',
+    '主要用户是谁？它更像 consumer、b2b 还是 agent？',
+    '第一版最小可用切片是什么？',
+    '哪些内容暂时不做，哪些既有能力不能被破坏？',
+    '如果涉及登录、数据、AI、外部服务或收费，最关键的风险是什么？',
   ]);
-  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(currentState));
+  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(storedCurrentState));
 
   return {
-    ws,
+    ws: { ...ws, data: { ...ws.data, currentState: storedCurrentState } },
     productType,
     sourceFiles: sourceFiles.map((filePath) => path.relative(ws.workspaceRoot, filePath)),
     transcript: sourceContent.join('\n\n---\n\n'),
-    currentState,
+    currentState: storedCurrentState,
   };
 }
 

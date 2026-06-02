@@ -9,6 +9,16 @@ const KNOWLEDGE_INDEX = cjoin(KNOWLEDGE_DIR, 'index.json');
 const KNOWLEDGE_CANDIDATES_DIR = cjoin(KNOWLEDGE_DIR, 'candidates');
 const KNOWLEDGE_DRAFTS_DIR = cjoin(KNOWLEDGE_DIR, 'drafts');
 const OPENPRD_HARNESS_TURN_STATE = cjoin('.openprd', 'harness', 'turn-state.json');
+const PENDING_KNOWLEDGE_CANDIDATE_STATUSES = new Set(['pending-review', 'pending']);
+const REVIEWED_KNOWLEDGE_CANDIDATE_STATUSES = new Set([
+  'promoted',
+  'merged',
+  'rejected',
+  'archived',
+  'reviewed-noise',
+  'reviewed-duplicate',
+  'reviewed-weak-signal',
+]);
 
 const CODE_EXTENSIONS = new Set([
   '.c',
@@ -138,6 +148,47 @@ function upsertBy(items, key, value, max = 200) {
   return [value, ...items.filter((item) => item?.[key] !== value[key])].slice(0, max);
 }
 
+function normalizeCandidateStatus(status) {
+  const normalized = String(status ?? '').trim();
+  if (!normalized || normalized === 'pending') return 'pending-review';
+  return normalized;
+}
+
+function isPendingKnowledgeCandidateStatus(status) {
+  return PENDING_KNOWLEDGE_CANDIDATE_STATUSES.has(String(status ?? '').trim() || 'pending-review');
+}
+
+function isReviewedKnowledgeCandidateStatus(status) {
+  const normalized = normalizeCandidateStatus(status);
+  return REVIEWED_KNOWLEDGE_CANDIDATE_STATUSES.has(normalized)
+    || !isPendingKnowledgeCandidateStatus(normalized);
+}
+
+function candidateStatusGroup(status) {
+  const normalized = normalizeCandidateStatus(status);
+  if (isPendingKnowledgeCandidateStatus(normalized)) return 'pending';
+  if (['promoted', 'merged'].includes(normalized)) return 'promoted';
+  if (normalized === 'rejected') return 'rejected';
+  if (normalized === 'archived') return 'archived';
+  return 'reviewed';
+}
+
+function resolveCandidateStatus(candidateStatus, indexStatus) {
+  const hasCandidateStatus = candidateStatus !== undefined && candidateStatus !== null && String(candidateStatus).trim();
+  const hasIndexStatus = indexStatus !== undefined && indexStatus !== null && String(indexStatus).trim();
+  const normalizedCandidate = normalizeCandidateStatus(candidateStatus);
+  const normalizedIndex = normalizeCandidateStatus(indexStatus);
+  if (
+    hasCandidateStatus
+    && isPendingKnowledgeCandidateStatus(normalizedCandidate)
+    && hasIndexStatus
+    && isReviewedKnowledgeCandidateStatus(normalizedIndex)
+  ) {
+    return normalizedIndex;
+  }
+  return hasCandidateStatus ? normalizedCandidate : normalizedIndex;
+}
+
 function signalSummary(signal) {
   if (!signal) return null;
   const parts = [];
@@ -162,6 +213,48 @@ function normalizeReviewSignal(projectRoot, signal = {}) {
     attentionGates: normalizeStringList(signal.attentionGates),
     summary: firstString(signal.summary, signal.message, signal.reason),
     touchedFiles,
+  };
+}
+
+function normalizeTouchedFiles(projectRoot, value) {
+  return uniq(normalizeStringList(value).map((file) => toRelativeProjectPath(projectRoot, file))).filter(Boolean);
+}
+
+function hasOverlap(left = [], right = []) {
+  const rightSet = new Set(right);
+  return left.some((item) => rightSet.has(item));
+}
+
+function buildReviewContext(projectRoot, raw = {}, options = {}) {
+  const rawTouchedFiles = normalizeTouchedFiles(projectRoot, raw.touchedFiles);
+  const optionTouchedFiles = normalizeTouchedFiles(projectRoot, options.touchedFiles);
+  const optionSignal = options.signal ? normalizeReviewSignal(projectRoot, options.signal) : null;
+  const embeddedSignals = Array.isArray(raw.reviewSignals)
+    ? raw.reviewSignals.map((signal) => normalizeReviewSignal(projectRoot, signal))
+    : [];
+  const latestSignalTouchedFiles = embeddedSignals.find((signal) => signal.touchedFiles.length > 0)?.touchedFiles ?? [];
+  const touchedFiles = optionTouchedFiles.length > 0
+    ? optionTouchedFiles
+    : (optionSignal?.touchedFiles?.length ? optionSignal.touchedFiles : (latestSignalTouchedFiles.length > 0 ? latestSignalTouchedFiles : rawTouchedFiles));
+  const signalEntries = [];
+  if (optionSignal) {
+    signalEntries.push(optionSignal);
+  }
+  for (const signal of embeddedSignals) {
+    const isSameSignal = optionSignal && signal.id === optionSignal.id && signal.kind === optionSignal.kind;
+    if (isSameSignal) continue;
+    if (!optionSignal) {
+      signalEntries.push(signal);
+      continue;
+    }
+    if (signal.touchedFiles.length > 0 && hasOverlap(signal.touchedFiles, touchedFiles)) {
+      signalEntries.push(signal);
+    }
+  }
+  const reviewSignals = uniq(signalEntries.map((signal) => JSON.stringify(signal))).map((entry) => JSON.parse(entry));
+  return {
+    touchedFiles,
+    reviewSignals,
   };
 }
 
@@ -467,16 +560,10 @@ export async function reviewKnowledgeWorkspace(projectRoot, options = {}) {
 
   const source = resolved.source;
   const raw = readJsonObject(rawInput.raw) ?? {};
-  const touchedFiles = uniq([
-    ...normalizeStringList(raw.touchedFiles).map((file) => toRelativeProjectPath(projectRoot, file)),
-    ...normalizeStringList(options.touchedFiles).map((file) => toRelativeProjectPath(projectRoot, file)),
-  ]).filter(Boolean);
+  const reviewContext = buildReviewContext(projectRoot, raw, options);
+  const touchedFiles = reviewContext.touchedFiles;
   const substantiveTouchedFiles = touchedFiles.filter(isSubstantiveTouchedFile);
-  const embeddedSignals = Array.isArray(raw.reviewSignals) ? raw.reviewSignals : [];
-  const reviewSignals = uniq([
-    ...embeddedSignals.map((signal) => JSON.stringify(normalizeReviewSignal(projectRoot, signal))),
-    ...(options.signal ? [JSON.stringify(normalizeReviewSignal(projectRoot, options.signal))] : []),
-  ]).map((entry) => JSON.parse(entry));
+  const reviewSignals = reviewContext.reviewSignals;
   const categories = buildKnowledgeCategories({ source, touchedFiles: substantiveTouchedFiles, reviewSignals });
   const reasons = categories.map(categoryReason);
   const hasStrongSignal = categories.length > 0
@@ -510,7 +597,7 @@ export async function reviewKnowledgeWorkspace(projectRoot, options = {}) {
   const draftSkillPath = knowledgePath(projectRoot, cjoin(KNOWLEDGE_DRAFTS_DIR, names.skillName, 'SKILL.md'));
   const existingCandidate = await readJson(candidatePath).catch(() => null);
   const reviewSummary = [
-    `本轮修改了 ${substantiveTouchedFiles.length} 个可沉淀文件。`,
+    `本轮围绕 ${substantiveTouchedFiles.length} 个可沉淀文件生成回顾。`,
     reasons[0] ?? '这次实现已经具备项目级经验抽象价值。',
     reviewSignals.length > 0 ? `已记录 ${reviewSignals.length} 条回顾信号。` : null,
   ].filter(Boolean).join(' ');
@@ -605,6 +692,251 @@ function candidateIdFromSourcePath(projectRoot, sourcePath) {
   return match ? match[1] : null;
 }
 
+function candidateIdFromPath(projectRoot, candidatePath) {
+  const direct = candidateIdFromSourcePath(projectRoot, candidatePath);
+  if (direct) return direct;
+  const basename = path.basename(String(candidatePath ?? ''));
+  return basename && basename !== 'candidate.json' ? basename : null;
+}
+
+async function readCandidateById(projectRoot, candidateId) {
+  if (!candidateId) return null;
+  const candidatePath = knowledgePath(projectRoot, cjoin(KNOWLEDGE_CANDIDATES_DIR, candidateId, 'candidate.json'));
+  const candidate = await readJson(candidatePath).catch(() => null);
+  if (!candidate) return null;
+  return {
+    ...candidate,
+    candidateId: candidate.candidateId ?? candidate.id ?? candidateId,
+    status: normalizeCandidateStatus(candidate.status),
+    files: {
+      ...(candidate.files ?? {}),
+      candidate: candidate.files?.candidate ?? candidatePath,
+      candidateDir: candidate.files?.candidateDir ?? path.dirname(candidatePath),
+    },
+  };
+}
+
+function candidateIndexEntry(projectRoot, candidate, patch = {}) {
+  const candidateId = candidate.candidateId ?? candidate.id ?? patch.candidateId;
+  const candidatePath = candidate.files?.candidate
+    ?? knowledgePath(projectRoot, cjoin(KNOWLEDGE_CANDIDATES_DIR, candidateId, 'candidate.json'));
+  return {
+    candidateId,
+    status: normalizeCandidateStatus(candidate.status),
+    path: candidatePath,
+    sourceKind: candidate.sourceKind ?? null,
+    sourceRef: candidate.sourceRef ?? null,
+    title: candidate.title ?? candidateId,
+    draftSkillPath: candidate.files?.draftSkill ?? null,
+    ...patch,
+  };
+}
+
+async function syncKnowledgeCandidateIndex(projectRoot, candidate, patch = {}) {
+  const index = await readKnowledgeIndex(projectRoot);
+  const entry = candidateIndexEntry(projectRoot, candidate, patch);
+  await writeKnowledgeIndex(projectRoot, {
+    ...index,
+    candidates: upsertBy(index.candidates, 'candidateId', entry),
+    drafts: entry.draftSkillPath
+      ? upsertBy(index.drafts, 'skillName', {
+          skillName: path.basename(path.dirname(entry.draftSkillPath)),
+          path: entry.draftSkillPath,
+          candidateId: entry.candidateId,
+          status: entry.status,
+        })
+      : index.drafts,
+  });
+  return entry;
+}
+
+function mergeCandidateWithIndex(candidate, indexEntry, projectRoot) {
+  const candidateId = candidate?.candidateId ?? candidate?.id ?? indexEntry?.candidateId ?? candidateIdFromPath(projectRoot, indexEntry?.path);
+  const status = resolveCandidateStatus(candidate?.status, indexEntry?.status);
+  const candidatePath = candidate?.files?.candidate
+    ?? indexEntry?.path
+    ?? (candidateId ? knowledgePath(projectRoot, cjoin(KNOWLEDGE_CANDIDATES_DIR, candidateId, 'candidate.json')) : null);
+  const draftSkillPath = candidate?.files?.draftSkill ?? indexEntry?.draftSkillPath ?? null;
+  return {
+    ...(indexEntry ?? {}),
+    ...(candidate ?? {}),
+    candidateId,
+    status,
+    statusGroup: candidateStatusGroup(status),
+    pending: isPendingKnowledgeCandidateStatus(status),
+    reviewed: isReviewedKnowledgeCandidateStatus(status),
+    path: candidatePath,
+    draftSkillPath,
+    title: candidate?.title ?? indexEntry?.title ?? candidateId,
+    sourceKind: candidate?.sourceKind ?? indexEntry?.sourceKind ?? null,
+    sourceRef: candidate?.sourceRef ?? indexEntry?.sourceRef ?? null,
+    files: {
+      ...(candidate?.files ?? {}),
+      candidate: candidatePath,
+      candidateDir: candidate?.files?.candidateDir ?? (candidatePath ? path.dirname(candidatePath) : null),
+      draftSkill: draftSkillPath,
+    },
+  };
+}
+
+function buildCandidateCounts(candidates) {
+  const counts = {
+    total: candidates.length,
+    pending: 0,
+    promoted: 0,
+    rejected: 0,
+    archived: 0,
+    reviewed: 0,
+    byStatus: {},
+  };
+  for (const candidate of candidates) {
+    counts.byStatus[candidate.status] = (counts.byStatus[candidate.status] ?? 0) + 1;
+    counts[candidate.statusGroup] = (counts[candidate.statusGroup] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export async function listKnowledgeCandidates(projectRoot, options = {}) {
+  await ensureKnowledgeWorkspace(projectRoot);
+  const index = await readKnowledgeIndex(projectRoot);
+  const byId = new Map();
+  for (const entry of index.candidates) {
+    if (!entry?.candidateId) continue;
+    byId.set(entry.candidateId, mergeCandidateWithIndex(null, entry, projectRoot));
+  }
+  const candidateRoot = knowledgePath(projectRoot, KNOWLEDGE_CANDIDATES_DIR);
+  const dirs = await fs.readdir(candidateRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of dirs) {
+    if (!entry.isDirectory()) continue;
+    const candidate = await readCandidateById(projectRoot, entry.name);
+    if (!candidate) continue;
+    byId.set(candidate.candidateId, mergeCandidateWithIndex(candidate, byId.get(candidate.candidateId), projectRoot));
+  }
+  const all = [...byId.values()].sort((left, right) => {
+    const leftAt = left.updatedAt ?? left.reviewedAt ?? left.createdAt ?? '';
+    const rightAt = right.updatedAt ?? right.reviewedAt ?? right.createdAt ?? '';
+    return String(rightAt).localeCompare(String(leftAt));
+  });
+  const status = normalizeCandidateStatus(options.status ?? 'pending-review');
+  const filtered = status === 'all'
+    ? all
+    : all.filter((candidate) => normalizeCandidateStatus(candidate.status) === status);
+  const pending = all.filter((candidate) => candidate.pending);
+  const reviewed = all.filter((candidate) => !candidate.pending);
+  return {
+    ok: true,
+    action: 'knowledge-candidates',
+    projectRoot,
+    status: options.status ?? 'pending-review',
+    candidates: filtered,
+    pending,
+    reviewed,
+    counts: buildCandidateCounts(all),
+    files: {
+      knowledgeIndex: knowledgePath(projectRoot, KNOWLEDGE_INDEX),
+      candidatesDir: candidateRoot,
+    },
+  };
+}
+
+async function updateKnowledgeCandidateStatus(projectRoot, options = {}) {
+  await ensureKnowledgeWorkspace(projectRoot);
+  const candidateId = options.id ?? candidateIdFromPath(projectRoot, options.path);
+  if (!candidateId) {
+    return {
+      ok: false,
+      action: `knowledge-${options.action ?? 'update'}`,
+      projectRoot,
+      errors: ['Knowledge candidate id is required.'],
+    };
+  }
+  const candidate = await readCandidateById(projectRoot, candidateId);
+  if (!candidate) {
+    return {
+      ok: false,
+      action: `knowledge-${options.action ?? 'update'}`,
+      projectRoot,
+      candidateId,
+      errors: [`Knowledge candidate not found: ${candidateId}`],
+    };
+  }
+  const status = normalizeCandidateStatus(options.status);
+  const nowValue = timestamp();
+  const reviewReason = firstString(options.reason, options.notes, options.reviewDecision);
+  const patch = {
+    status,
+    updatedAt: nowValue,
+    reviewedAt: status === 'pending-review' ? candidate.reviewedAt ?? null : nowValue,
+    reviewedBy: status === 'pending-review' ? candidate.reviewedBy ?? null : firstString(options.reviewedBy, 'codex'),
+    reviewDecision: firstString(options.reviewDecision, reviewReason, status),
+    reviewReason: reviewReason ?? null,
+  };
+  if (status === 'rejected') {
+    patch.rejectedAt = nowValue;
+  }
+  if (status === 'archived') {
+    patch.archivedAt = nowValue;
+  }
+  if (status === 'pending-review') {
+    patch.restoredAt = nowValue;
+    patch.reviewDecision = null;
+    patch.reviewReason = null;
+  }
+  const nextCandidate = {
+    ...candidate,
+    ...patch,
+    files: candidate.files,
+  };
+  const candidatePath = nextCandidate.files.candidate;
+  await writeJson(candidatePath, nextCandidate);
+  const indexPatch = {
+    ...patch,
+    reviewedAt: nextCandidate.reviewedAt,
+    reviewedBy: nextCandidate.reviewedBy,
+    reviewDecision: nextCandidate.reviewDecision,
+    reviewReason: nextCandidate.reviewReason,
+  };
+  const entry = await syncKnowledgeCandidateIndex(projectRoot, nextCandidate, indexPatch);
+  return {
+    ok: true,
+    action: `knowledge-${options.action ?? status}`,
+    projectRoot,
+    candidateId,
+    candidate: mergeCandidateWithIndex(nextCandidate, entry, projectRoot),
+    files: {
+      candidate: candidatePath,
+      knowledgeIndex: knowledgePath(projectRoot, KNOWLEDGE_INDEX),
+    },
+  };
+}
+
+export async function rejectKnowledgeCandidate(projectRoot, options = {}) {
+  return updateKnowledgeCandidateStatus(projectRoot, {
+    ...options,
+    action: 'reject',
+    status: 'rejected',
+    reviewDecision: firstString(options.reason, options.notes, 'rejected'),
+  });
+}
+
+export async function archiveKnowledgeCandidate(projectRoot, options = {}) {
+  return updateKnowledgeCandidateStatus(projectRoot, {
+    ...options,
+    action: 'archive',
+    status: 'archived',
+    reviewDecision: firstString(options.reason, options.notes, 'archived'),
+  });
+}
+
+export async function restoreKnowledgeCandidate(projectRoot, options = {}) {
+  return updateKnowledgeCandidateStatus(projectRoot, {
+    ...options,
+    action: 'restore',
+    status: 'pending-review',
+    reviewDecision: null,
+  });
+}
+
 export async function markKnowledgeCandidatePromoted(projectRoot, options = {}) {
   await ensureKnowledgeWorkspace(projectRoot);
   const candidateId = candidateIdFromSourcePath(projectRoot, options.sourcePath)
@@ -619,36 +951,26 @@ export async function markKnowledgeCandidatePromoted(projectRoot, options = {}) 
   if (!candidate) {
     return { ok: true, updated: false };
   }
-  await writeJson(candidatePath, {
+  const nextCandidate = {
     ...candidate,
+    candidateId: candidate.candidateId ?? candidate.id ?? candidateId,
     status: 'promoted',
     promotedAt: timestamp(),
     promotedSkillPath: options.skillPath ?? null,
     promotedIncidentPath: options.incidentPath ?? null,
     promotedPatternPath: options.patternPath ?? null,
     updatedAt: timestamp(),
-  });
-  const index = await readKnowledgeIndex(projectRoot);
-  await writeKnowledgeIndex(projectRoot, {
-    ...index,
-    candidates: upsertBy(index.candidates, 'candidateId', {
-      ...(index.candidates.find((item) => item.candidateId === candidateId) ?? {}),
-      candidateId,
-      status: 'promoted',
-      path: candidatePath,
-      draftSkillPath: candidate.files?.draftSkill ?? null,
-      sourceKind: candidate.sourceKind ?? null,
-      sourceRef: candidate.sourceRef ?? null,
-      title: candidate.title ?? candidateId,
-    }),
-    drafts: candidate.files?.draftSkill
-      ? upsertBy(index.drafts, 'skillName', {
-          skillName: path.basename(path.dirname(candidate.files.draftSkill)),
-          path: candidate.files.draftSkill,
-          candidateId,
-          status: 'promoted',
-        })
-      : index.drafts,
+    files: {
+      ...(candidate.files ?? {}),
+      candidate: candidate.files?.candidate ?? candidatePath,
+      candidateDir: candidate.files?.candidateDir ?? path.dirname(candidatePath),
+    },
+  };
+  await writeJson(candidatePath, nextCandidate);
+  await syncKnowledgeCandidateIndex(projectRoot, nextCandidate, {
+    status: 'promoted',
+    promotedAt: nextCandidate.promotedAt,
+    promotedSkillPath: nextCandidate.promotedSkillPath,
   });
   return {
     ok: true,
@@ -661,8 +983,11 @@ export async function markKnowledgeCandidatePromoted(projectRoot, options = {}) 
 export {
   deriveKnowledgeNames,
   ensureKnowledgeWorkspace,
+  isPendingKnowledgeCandidateStatus,
+  isReviewedKnowledgeCandidateStatus,
   KNOWLEDGE_CANDIDATES_DIR,
   KNOWLEDGE_DRAFTS_DIR,
   KNOWLEDGE_INDEX,
+  normalizeCandidateStatus,
   OPENPRD_HARNESS_TURN_STATE,
 };

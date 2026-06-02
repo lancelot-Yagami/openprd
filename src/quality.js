@@ -4,8 +4,17 @@ import { cjoin, exists, readJson, readText, writeJson, writeText } from './fs-ut
 import { renderQualityEvalArtifact } from './html-artifacts.js';
 import { renderExperienceSkill, resolveQualityLearningSource } from './quality-learning.js';
 import {
+  detectTestStrategyCapabilities,
+  summarizeTaskTestStrategies,
+} from './test-strategy.js';
+import {
+  detectVisualReview,
+  listVisualReviewArtifacts,
+} from './quality-visual-review.js';
+import {
   deriveKnowledgeNames,
   ensureKnowledgeWorkspace,
+  listKnowledgeCandidates,
   KNOWLEDGE_CANDIDATES_DIR,
   KNOWLEDGE_DRAFTS_DIR,
   markKnowledgeCandidatePromoted,
@@ -74,8 +83,10 @@ const QUALITY_GATE_IDS = [
   'traceability',
   'redaction',
   'business-guardrails',
+  'test-strategy',
   'smoke',
   'feature-coverage',
+  'visual-review',
   'normal-performance',
   'extreme-performance',
   'knowledge',
@@ -87,8 +98,10 @@ const EVIDENCE_TOKENS = {
   traceability: ['trace_id', 'span_id', 'request_id', 'task_id', 'error_id', 'trace verified', '链路', '追踪'],
   redaction: ['redaction', 'redact', 'mask', 'masked', 'pii', 'secret', 'token redacted', '脱敏', '敏感字段'],
   'business-guardrails': ['quota', 'rate limit', 'abuse', 'budget', 'kill switch', 'cost_usd', '额度', '限流', '滥用', '止损'],
+  'test-strategy': ['test-layer', 'test-size', 'test-scope', 'evidence-plan', 'testing pyramid', '测试策略', '测试分流', '单元测试', '集成测试', '端到端'],
   smoke: ['smoke', 'e2e', 'playwright', 'cypress', 'main flow', 'happy path', '冒烟', '主流程'],
   'feature-coverage': ['feature coverage', 'acceptance', 'tasks done', 'openprd tasks', '验收', '功能覆盖', '任务完成'],
+  'visual-review': ['visual-compare', 'visual-before-after', 'reference-actual', 'before-after', '效果图', '实现截图', '修改前', '修改后', '视觉对比'],
   'normal-performance': ['performance', 'perf', 'benchmark', 'latency', 'p95', 'lighthouse', 'k6', '性能', '耗时'],
   'extreme-performance': ['extreme', 'stress', 'load test', 'large-data', 'pressure', 'k6', '压力', '极端', '大数据'],
   knowledge: ['quality learn', 'incident', 'pattern', 'skill', '复盘', '经验', '沉淀'],
@@ -126,6 +139,7 @@ function defaultQualityConfig() {
       currentEvidenceRequired: true,
       evidenceSources: [
         '.openprd/harness/test-reports',
+        '.openprd/harness/visual-reviews',
         '.openprd/quality/evidence',
         'test-results',
         'tests/reports',
@@ -133,8 +147,8 @@ function defaultQualityConfig() {
       ],
       scenarioProfiles: {
         core: ['smoke', 'feature-coverage'],
-        frontend: ['smoke'],
-        desktop: ['smoke'],
+        frontend: ['smoke', 'visual-review'],
+        desktop: ['smoke', 'visual-review'],
         backend: ['smoke', 'traceability'],
         businessCost: ['business-guardrails'],
         security: ['redaction'],
@@ -516,7 +530,7 @@ function buildQualityPolicy({ config, activeChangeContext, activeTasks, business
   };
 }
 
-function buildEvidenceLedger({ evidenceFiles, activeTasks, observability, businessGuardrails, knowledge }) {
+function buildEvidenceLedger({ evidenceFiles, activeTasks, observability, businessGuardrails, knowledge, visualReview }) {
   const ledger = Object.fromEntries(QUALITY_GATE_IDS.map((gate) => {
     const tokens = EVIDENCE_TOKENS[gate] ?? [];
     const matches = evidenceFiles
@@ -589,6 +603,12 @@ function buildEvidenceLedger({ evidenceFiles, activeTasks, observability, busine
         ...knowledge.candidates.slice(0, 6).map((candidate) => ({ path: candidate, source: 'openprd-knowledge-candidate' })),
       ].slice(0, 12),
       summary: `已有 ${knowledge.candidates.length} 个待确认 knowledge candidate`,
+    };
+  }
+  if (visualReview?.evidence) {
+    ledger['visual-review'] = {
+      ...ledger['visual-review'],
+      ...visualReview.evidence,
     };
   }
   return ledger;
@@ -667,6 +687,8 @@ function detectEvalHarness({ config, files, texts, packageJson, activeTasks }) {
   const scriptEntries = Object.entries(scripts);
   const commandText = scriptEntries.map(([name, command]) => `${name}: ${command}`).join('\n');
   const hasTest = scriptEntries.some(([name]) => /(^|:)(test|check)$/.test(name)) || includesAny(commandText, ['node --test', 'vitest', 'jest', 'pytest']);
+  const testStrategy = summarizeTaskTestStrategies(activeTasks.tasks ?? []);
+  const testCapabilities = detectTestStrategyCapabilities({ scripts, files, dependencyNames });
   const smokeCommands = scriptEntries
     .filter(([name, command]) => /smoke|e2e|playwright|cypress|test:ui/i.test(`${name} ${command}`))
     .map(([name, command]) => `${name}: ${command}`);
@@ -695,9 +717,15 @@ function detectEvalHarness({ config, files, texts, packageJson, activeTasks }) {
   if (activeTasks.total > 0 && activeTasks.pending > 0) {
     warnings.push(`当前任务清单仍有 ${activeTasks.pending} 个未完成条目，功能覆盖不能判定为完整。`);
   }
+  warnings.push(...testStrategy.warnings);
   return {
     status: hasSmoke && hasPerf && hasExtremeFixtures && activeTasks.pending === 0 ? 'pass' : 'needs-attention',
     hasUnitOrCommandTests: hasTest,
+    testStrategy: {
+      status: testStrategy.total === 0 || testStrategy.warnings.length > 0 ? 'needs-attention' : 'pass',
+      ...testStrategy,
+      capabilities: testCapabilities,
+    },
     smoke: {
       present: hasSmoke,
       commands: smokeCommands,
@@ -800,18 +828,29 @@ async function readActiveTasks(projectRoot) {
   for (const relativePath of taskFiles) {
     const text = await readText(cjoin(projectRoot, relativePath)).catch(() => '');
     const lines = text.split(/\r?\n/);
+    let currentTask = null;
     for (let index = 0; index < lines.length; index += 1) {
       const match = lines[index].match(/^\s*-\s+\[([ xX~-])\]\s+(.+)$/);
       if (match) {
         const done = /x/i.test(match[1]);
         const blocked = match[1] === '~' || /blocked|阻塞/i.test(match[2]);
-        tasks.push({
-          title: match[2].trim(),
+        const title = match[2].trim();
+        const structured = title.match(/^(T\d{3}\.\d+)\s+(.+)$/);
+        currentTask = {
+          id: structured?.[1] ?? null,
+          title: structured?.[2]?.trim() ?? title,
           done,
           blocked,
           source: relativePath,
           line: index + 1,
-        });
+          metadata: {},
+        };
+        tasks.push(currentTask);
+        continue;
+      }
+      const metadataMatch = lines[index].match(/^\s{2,}-\s+([a-z0-9_-]+):\s*(.*)$/i);
+      if (currentTask && metadataMatch) {
+        currentTask.metadata[metadataMatch[1].toLowerCase()] = metadataMatch[2].trim();
       }
     }
   }
@@ -821,7 +860,7 @@ async function readActiveTasks(projectRoot) {
     done: tasks.filter((task) => task.done).length,
     pending: tasks.filter((task) => !task.done && !task.blocked).length,
     blocked: tasks.filter((task) => task.blocked).length,
-    tasks: tasks.slice(0, 50),
+    tasks,
   };
 }
 
@@ -843,7 +882,7 @@ async function listKnowledgeFiles(projectRoot) {
   return collected;
 }
 
-function detectKnowledge({ config, knowledgeFiles }) {
+function detectKnowledge({ config, knowledgeFiles, candidateState }) {
   const skillDir = config.knowledge.skillDir ?? '.openprd/knowledge/skills';
   const candidateDir = config.knowledge.candidateDir ?? KNOWLEDGE_CANDIDATES_DIR;
   const draftDir = config.knowledge.draftDir ?? KNOWLEDGE_DRAFTS_DIR;
@@ -851,10 +890,12 @@ function detectKnowledge({ config, knowledgeFiles }) {
     .filter((file) => file.path.startsWith(skillDir.replace(/\//g, path.sep)) || file.path.startsWith(skillDir))
     .filter((file) => file.path.endsWith('SKILL.md'))
     .map((file) => file.path);
-  const candidates = knowledgeFiles
+  const candidateFiles = knowledgeFiles
     .filter((file) => file.path.startsWith(candidateDir.replace(/\//g, path.sep)) || file.path.startsWith(candidateDir))
     .filter((file) => file.path.endsWith('candidate.json'))
     .map((file) => file.path);
+  const pendingCandidates = (candidateState?.pending ?? []).map((candidate) => candidate.path).filter(Boolean);
+  const reviewedCandidates = (candidateState?.reviewed ?? []).map((candidate) => candidate.path).filter(Boolean);
   const drafts = knowledgeFiles
     .filter((file) => file.path.startsWith(draftDir.replace(/\//g, path.sep)) || file.path.startsWith(draftDir))
     .filter((file) => file.path.endsWith('SKILL.md'))
@@ -864,8 +905,8 @@ function detectKnowledge({ config, knowledgeFiles }) {
   if (config.knowledge.enabled && skills.length === 0) {
     warnings.push('项目级经验 skill 库尚为空；首次问题修复后应沉淀抽象经验。');
   }
-  if (config.knowledge.enabled && candidates.length > 0) {
-    warnings.push(`当前有 ${candidates.length} 个待确认 knowledge candidate；本轮收工前应决定是否 promote 为正式项目经验。`);
+  if (config.knowledge.enabled && pendingCandidates.length > 0) {
+    warnings.push(`当前有 ${pendingCandidates.length} 个待确认 knowledge candidate；本轮收工前应决定 promote、reject 或 archive。`);
   }
   return {
     status: !config.knowledge.enabled || skills.length > 0 ? 'pass' : 'needs-attention',
@@ -874,7 +915,19 @@ function detectKnowledge({ config, knowledgeFiles }) {
     candidateDir,
     draftDir,
     skills,
-    candidates,
+    candidates: pendingCandidates,
+    candidateFiles,
+    candidateCounts: candidateState?.counts ?? {
+      total: candidateFiles.length,
+      pending: pendingCandidates.length,
+      promoted: 0,
+      rejected: 0,
+      archived: 0,
+      reviewed: reviewedCandidates.length,
+      byStatus: {},
+    },
+    reviewedCandidates,
+    candidateDetails: candidateState?.candidates ?? [],
     drafts,
     incidents: incidents.map((file) => file.path),
     recommendations: [
@@ -909,7 +962,7 @@ function buildGate({ id, label, baseStatus, baseWarnings, policy, evidenceLedger
   };
 }
 
-function buildGates({ observability, evalHarness, businessGuardrails, knowledge, policy, evidenceLedger }) {
+function buildGates({ observability, evalHarness, businessGuardrails, knowledge, visualReview, policy, evidenceLedger }) {
   return [
     buildGate({
       id: 'traceability',
@@ -936,6 +989,14 @@ function buildGates({ observability, evalHarness, businessGuardrails, knowledge,
       evidenceLedger,
     }),
     buildGate({
+      id: 'test-strategy',
+      label: '分层测试策略',
+      baseStatus: evalHarness.testStrategy.status,
+      baseWarnings: evalHarness.testStrategy.warnings,
+      policy,
+      evidenceLedger,
+    }),
+    buildGate({
       id: 'smoke',
       label: '冒烟测试体系',
       baseStatus: evalHarness.smoke.present ? 'pass' : 'needs-attention',
@@ -948,6 +1009,14 @@ function buildGates({ observability, evalHarness, businessGuardrails, knowledge,
       label: '任务与功能覆盖',
       baseStatus: evalHarness.featureCoverage.activeTasks.pending === 0 ? 'pass' : 'needs-attention',
       baseWarnings: evalHarness.featureCoverage.activeTasks.pending === 0 ? [] : ['仍有未完成任务或缺少任务覆盖证据。'],
+      policy,
+      evidenceLedger,
+    }),
+    buildGate({
+      id: 'visual-review',
+      label: '视觉对比与自检',
+      baseStatus: visualReview.status,
+      baseWarnings: visualReview.warnings,
       policy,
       evidenceLedger,
     }),
@@ -991,14 +1060,17 @@ async function buildQualityReport(projectRoot, config) {
   const activeTasks = await readActiveTasks(projectRoot);
   const activeChangeContext = await readActiveChangeContext(projectRoot, activeTasks.activeChange);
   const evidenceFiles = await readEvidenceFiles(projectRoot, normalizedConfig);
+  const visualArtifacts = await listVisualReviewArtifacts(projectRoot);
   const knowledgeFiles = await listKnowledgeFiles(projectRoot);
   const observability = detectObservability({ config: normalizedConfig, files, texts, packageJson });
   const evalHarness = detectEvalHarness({ config: normalizedConfig, files, texts, packageJson, activeTasks });
   const businessGuardrails = detectBusinessGuardrails({ config: normalizedConfig, files, texts, packageJson });
-  const knowledge = detectKnowledge({ config: normalizedConfig, knowledgeFiles });
+  const candidateState = await listKnowledgeCandidates(projectRoot, { status: 'all' }).catch(() => null);
+  const knowledge = detectKnowledge({ config: normalizedConfig, knowledgeFiles, candidateState });
   const policy = buildQualityPolicy({ config: normalizedConfig, activeChangeContext, activeTasks, businessGuardrails });
-  const evidenceLedger = buildEvidenceLedger({ evidenceFiles, activeTasks, observability, businessGuardrails, knowledge });
-  const gates = buildGates({ observability, evalHarness, businessGuardrails, knowledge, policy, evidenceLedger });
+  const visualReview = detectVisualReview({ policy, activeChangeContext, activeTasks, visualArtifacts, includesAny });
+  const evidenceLedger = buildEvidenceLedger({ evidenceFiles, activeTasks, observability, businessGuardrails, knowledge, visualReview });
+  const gates = buildGates({ observability, evalHarness, businessGuardrails, knowledge, visualReview, policy, evidenceLedger });
   const blockingStatuses = new Set(['fail']);
   const attentionStatuses = new Set(['needs-attention', 'needs-evidence']);
   const readiness = {
@@ -1010,7 +1082,7 @@ async function buildQualityReport(projectRoot, config) {
   };
   evalHarness.executionEvidence = {
     sources: evidenceFiles.map((file) => ({ path: file.path, source: file.source, size: file.size })).slice(0, 120),
-    ledger: Object.fromEntries(['smoke', 'feature-coverage', 'normal-performance', 'extreme-performance'].map((gate) => [gate, evidenceLedger[gate]])),
+    ledger: Object.fromEntries(['test-strategy', 'smoke', 'feature-coverage', 'visual-review', 'normal-performance', 'extreme-performance'].map((gate) => [gate, evidenceLedger[gate]])),
   };
   return {
     version: 1,
@@ -1032,6 +1104,7 @@ async function buildQualityReport(projectRoot, config) {
     observability,
     evalHarness,
     businessGuardrails,
+    visualReview,
     knowledge,
     configSnapshot: normalizedConfig,
   };

@@ -109,7 +109,7 @@ description: 把自然语言里的 OpenPrd 或 OpenSpec 深度、持续、全面
    - `openprd change <path> --generate --change <id>`
 8. 只有在需要单独检查 change 结构时，才运行 `openprd change <path> --validate --change <id>`；通常 discovery verify 在配置了 `activeChange` 时会一并检查
 9. 报告发现结果就绪前，运行 `openprd standards <path> --verify`
-10. 阶段性实现或任务完成后，运行 `openprd quality <path> --verify`，让 HTML 质量评估报告审查日志、业务护栏、冒烟覆盖、功能覆盖、性能基线、极端数据和知识缺口
+10. 单个任务完成后只保留 task-scoped evidence；阶段收口、全部实现完成或高风险动作前，再运行 `openprd quality <path> --verify`，让 HTML 质量评估报告审查日志、业务护栏、冒烟覆盖、功能覆盖、性能基线、极端数据和知识缺口
 11. 修改文档或任务前，先从当前 run 目录重新读取状态
 
 ## 运行目录
@@ -176,7 +176,7 @@ hook harness 还会写入：
 - 使用 `openprd change <path> --apply --change <id>` 把完成的 change specs 推进到 `openprd/specs`
 - 使用 `openprd change <path> --archive --change <id>` 把完成的 change 文件移动到 `openprd/archive/changes`
 - 当任务或 discovery pass 改动了基线文档、文件说明书或文件夹 README 时，运行 `openprd standards <path> --verify`
-- 在声明任务实现就绪前，运行 `openprd quality <path> --verify`；当某个已验证修复应该沉淀为项目级复用经验时，运行 `openprd quality <path> --learn --from <report>`
+- 在声明单个任务完成前，运行本任务最小足够验证并留下 evidence；在阶段收口或声明整体实现就绪前，运行 `openprd quality <path> --verify`；当某个已验证修复应该沉淀为项目级复用经验时，运行 `openprd quality <path> --learn --from <report>`
 - 如果任务被依赖阻塞，先完成更早的任务 id；不要人工跳过依赖顺序
 - 执行证据应保留在生成的任务事件或 discovery claims 中，不要给每个任务额外挂一堆元数据
 

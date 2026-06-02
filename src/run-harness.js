@@ -1,8 +1,12 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import { labelExecutionMode, taskExecutionStrategy, describeExecutionStrategy } from './execution-strategy.js';
 import { appendJsonl, appendText, cjoin, exists, readJson, readJsonl, writeJson, writeText } from './fs-utils.js';
 import { OPENPRD_HARNESS_TURN_STATE, recordKnowledgeReviewSignal, reviewKnowledgeWorkspace } from './knowledge.js';
 import { readSessionBinding } from './session-binding.js';
+import { readSessionRegistryEntry } from './session-registry.js';
 import { timestamp } from './time.js';
+import { readWorkspaceRegistry } from './workspace-registry.js';
 
 const OPENPRD_HARNESS_DIR = cjoin('.openprd', 'harness');
 const OPENPRD_HARNESS_RUN_STATE = cjoin(OPENPRD_HARNESS_DIR, 'run-state.json');
@@ -11,8 +15,10 @@ const OPENPRD_HARNESS_LEARNINGS = cjoin(OPENPRD_HARNESS_DIR, 'learnings.md');
 const OPENPRD_HARNESS_LOOP_FEATURE_LIST = cjoin(OPENPRD_HARNESS_DIR, 'feature-list.json');
 const OPENPRD_HARNESS_REQUIREMENT_GATE = cjoin(OPENPRD_HARNESS_DIR, 'requirement-gate.json');
 const OPENPRD_HARNESS_REQUIREMENT_GATES_DIR = cjoin(OPENPRD_HARNESS_DIR, 'requirement-gates');
+const OPENPRD_HARNESS_SESSION_BINDINGS_DIR = cjoin(OPENPRD_HARNESS_DIR, 'session-bindings');
 const OPENPRD_HARNESS_EVENTS = cjoin(OPENPRD_HARNESS_DIR, 'events.jsonl');
 const OPENPRD_WORK_UNITS_DIR = cjoin('.openprd', 'engagements', 'work-units');
+const OPENPRD_PARALLEL_WORKER_IMPLEMENTATION_TASK_THRESHOLD = 3;
 const OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD = 10;
 const CONTINUATION_SESSION_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const CONTINUATION_TASK_HANDLE_PATTERN = /\b[a-z0-9._-]+:T\d{3}\.\d{2}:[a-z0-9._-]+\b/i;
@@ -21,6 +27,13 @@ const CONTINUATION_EXPLICIT_PATTERN = /(继续(这个|这条|当前)?(对话|任
 const CONTINUATION_CURRENT_PATTERN = /(继续当前|当前(这个|这条)?(任务|会话|记录|需求|变更)|current\s+(task|change|session)|resume current)/i;
 function harnessFile(projectRoot, relativePath) {
   return cjoin(projectRoot, relativePath);
+}
+
+function rootsEqual(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+  return path.resolve(left) === path.resolve(right);
 }
 
 async function ensureRunHarness(projectRoot) {
@@ -74,6 +87,7 @@ function compactTask(task) {
   if (!task) {
     return null;
   }
+  const executionStrategy = taskExecutionStrategy(task);
   return {
     id: task.id,
     taskHandle: task.taskHandle ?? null,
@@ -85,6 +99,60 @@ function compactTask(task) {
     oracle: task.metadata?.oracle ?? null,
     deps: task.metadata?.deps ?? null,
     type: task.metadata?.type ?? task.metadata?.category ?? task.metadata?.kind ?? null,
+    executionStrategy,
+    executionStrategyDescription: describeExecutionStrategy(executionStrategy),
+  };
+}
+
+function workerCandidateFromTask(task) {
+  const executionStrategy = taskExecutionStrategy(task);
+  if (executionStrategy.ownerRole !== 'worker') {
+    return null;
+  }
+  return {
+    id: task.id,
+    title: task.title,
+    parallelGroup: executionStrategy.parallelGroup,
+    writeScope: executionStrategy.writeScope,
+    localVerify: executionStrategy.localVerify,
+  };
+}
+
+function buildParallelPlan({ executionMode, taskState, focusTask, worktreeRecommended = false }) {
+  const eligible = executionMode !== 'serial';
+  const workerCandidates = (taskState?.tasks ?? [])
+    .filter((task) => !task.checked)
+    .map(workerCandidateFromTask)
+    .filter(Boolean);
+  const groups = [...new Set(workerCandidates.map((task) => task.parallelGroup))];
+  const focusCandidate = focusTask?.executionStrategy?.ownerRole === 'worker'
+    ? {
+        id: focusTask.id,
+        title: focusTask.title,
+        parallelGroup: focusTask.executionStrategy.parallelGroup,
+        writeScope: focusTask.executionStrategy.writeScope,
+        localVerify: focusTask.executionStrategy.localVerify,
+      }
+    : workerCandidates.find((task) => task.id === focusTask?.id) ?? null;
+
+  return {
+    eligible,
+    coordinator: 'main-agent',
+    integrationOwner: 'main-agent',
+    worktreeRecommended,
+    shardBasis: eligible ? 'write-scope-and-parallel-group' : 'single-thread',
+    suggestedWorkers: eligible ? Math.min(workerCandidates.length, worktreeRecommended ? 4 : 3) : 0,
+    workerTaskCount: workerCandidates.length,
+    groups,
+    focusTask: focusCandidate,
+    workerCandidates: workerCandidates.slice(0, worktreeRecommended ? 4 : 3),
+    summary: eligible
+      ? (
+          worktreeRecommended
+            ? '建议主 Agent 按 write-scope 和 parallel-group 把任务分给多个隔离 worker，会后由主 Agent 统一做集成审查和总验证。'
+            : '建议主 Agent 按 write-scope 和 parallel-group 分配边界清晰的 worker shard，worker 先做局部实现和局部验证，再由主 Agent 收口。'
+        )
+      : '当前任务保持主 Agent 串行推进即可。',
   };
 }
 
@@ -132,9 +200,68 @@ function reviewMarkCommand(snapshot) {
 function executionGate() {
   return {
     requiresExplicitIntent: true,
+    confirmationChecklistRequired: true,
     allowedIntents: ['开发', '实现', '修复', '继续任务', '落地执行', '深度调研', '深度对标', '复刻落地', '提交'],
     readOnlyIntents: ['看看', '规划', '梳理', '分析', '评估', '预计动哪些文件', '怎么改', '代码审查'],
-    rule: '只有当用户当前明确要求实现、继续、深度调研、对标或提交时，才运行 executionCommand。规划、分析、文件影响范围和审查类请求保持只读，并基于证据回答。',
+    rule: '只有当用户当前明确要求实现、继续、深度调研、对标或提交时，才运行 executionCommand。若还需要向用户索取执行授权，先展示 executionConfirmationChecklist，再请求明确确认；规划、分析、文件影响范围和审查类请求保持只读，并基于证据回答。',
+  };
+}
+
+function buildExecutionConfirmationChecklist(recommendation) {
+  if (!recommendation?.executionCommand) {
+    return null;
+  }
+  const parallelPlan = recommendation.parallelPlan ?? null;
+  const scope = [
+    recommendation.executionMode ? `执行模式: ${labelExecutionMode(recommendation.executionMode)}` : null,
+    recommendation.changeId ? `变更: ${recommendation.changeId}` : null,
+    recommendation.task ? `任务: ${recommendation.task.id} ${recommendation.task.title}` : null,
+    recommendation.coverageItem ? `覆盖项: ${recommendation.coverageItem.id} ${recommendation.coverageItem.title}` : null,
+    recommendation.prd?.versionId ? `PRD: ${recommendation.prd.versionId}` : null,
+  ].filter(Boolean);
+  return {
+    required: true,
+    title: '执行确认清单',
+    objective: recommendation.title ?? '推进当前 OpenPrd 推荐动作',
+    scope,
+    implementationItems: [
+      recommendation.command ? `先用只读命令复核上下文: ${recommendation.command}` : null,
+      recommendation.preparationCommand ? `准备执行环境或任务计划: ${recommendation.preparationCommand}` : null,
+      `运行执行命令: ${recommendation.executionCommand}`,
+      parallelPlan?.eligible ? `并行策略: ${parallelPlan.summary}` : null,
+      parallelPlan?.focusTask ? `当前 worker shard: ${parallelPlan.focusTask.id} ${parallelPlan.focusTask.title} -> ${parallelPlan.focusTask.writeScope.join(', ')}` : null,
+      parallelPlan?.worktreeRecommended ? '建议每个 worker 使用独立 worktree 或等价隔离环境，避免写入范围互相踩踏。' : null,
+      '把改动限制在当前已确认的 PRD、change、task 或 discovery 覆盖项内',
+    ].filter(Boolean),
+    outOfScope: [
+      '不默认处理清单外的历史需求或相似 active change',
+      '不默认执行 commit、push、release 或 publish',
+      '不做清单外的全局环境变更；确需全局修复时必须在清单里单列',
+      parallelPlan?.eligible ? '不默认自动 spawn worker；主 Agent 需要先确认 shard 边界和窗口归属。' : null,
+    ].filter(Boolean),
+    verification: [
+      recommendation.verifyCommand ? `执行后验证: ${recommendation.verifyCommand}` : null,
+      parallelPlan?.eligible ? '每个 worker 先完成 local-verify，主 Agent 再统一执行总验证。' : null,
+      '代码修改完成后，对本轮 touched code files 运行 openprd dev-check . <file...>',
+      '声明就绪前运行 openprd standards . --verify、openprd quality . --verify 和 openprd run . --verify',
+    ].filter(Boolean),
+    risks: [
+      '执行命令会写入工作区，用户确认前不得运行',
+      '工作区历史 standards/quality debt 可能导致最终 verify 出现非本任务阻断项，需要单列说明',
+      parallelPlan?.eligible ? '并行 worker 之间不能改动重叠 write-scope；发生冲突时由主 Agent 收口。' : null,
+    ],
+    confirmationPrompt: '请先把这份清单给用户确认；用户明确同意后再运行 executionCommand。',
+  };
+}
+
+function withExecutionConfirmationChecklist(recommendation) {
+  const checklist = buildExecutionConfirmationChecklist(recommendation);
+  if (!checklist) {
+    return recommendation;
+  }
+  return {
+    ...recommendation,
+    executionConfirmationChecklist: checklist,
   };
 }
 
@@ -540,13 +667,43 @@ async function readSessionEvents(projectRoot, sessionId) {
   return events.filter((event) => event?.sessionId === sessionId);
 }
 
-async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureList) {
+async function readLoopFeatureList(projectRoot) {
+  return readJson(harnessFile(projectRoot, OPENPRD_HARNESS_LOOP_FEATURE_LIST)).catch(() => null);
+}
+
+async function findSessionWorkspaceCandidates(projectRoot, sessionId, options = {}) {
+  const registry = await readWorkspaceRegistry(options).catch(() => null);
+  if (!registry) {
+    return [];
+  }
+  const currentRoot = path.resolve(projectRoot);
+  const candidates = [];
+  for (const entry of registry.entries) {
+    if (rootsEqual(entry.workspaceRoot, currentRoot)) {
+      continue;
+    }
+    const bindingPath = cjoin(entry.workspaceRoot, OPENPRD_HARNESS_SESSION_BINDINGS_DIR, `${sessionId}.json`);
+    const gatePath = cjoin(entry.workspaceRoot, OPENPRD_HARNESS_REQUIREMENT_GATES_DIR, `${sessionId}.json`);
+    if (await exists(bindingPath)) {
+      candidates.push({ workspaceRoot: entry.workspaceRoot, source: 'session-binding' });
+      continue;
+    }
+    if (await exists(gatePath)) {
+      candidates.push({ workspaceRoot: entry.workspaceRoot, source: 'requirement-gate' });
+    }
+  }
+  return candidates;
+}
+
+async function resolveSessionTargetInWorkspace(projectRoot, sessionId, index, loopFeatureList, options = {}) {
   const binding = await readSessionBinding(projectRoot, sessionId);
   const gate = await readSessionRequirementGate(projectRoot, sessionId);
   const events = await readSessionEvents(projectRoot, sessionId);
   const directBindingArtifacts = binding ? { sessionBinding: true } : {};
+  const workspaceRoot = path.resolve(projectRoot);
   if (binding?.taskHandle) {
-    return resolveTaskHandleTarget(binding.taskHandle, index, loopFeatureList, {
+    return {
+      ...(resolveTaskHandleTarget(binding.taskHandle, index, loopFeatureList, {
       source: 'session-binding',
       sessionId,
       workUnitId: binding.workUnitId ?? null,
@@ -557,7 +714,10 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
         events: events.length,
       },
       reason: `会话 ${sessionId} 的 lane 绑定命中任务句柄 ${binding.taskHandle}。`,
-    });
+      }) ?? {}),
+      workspaceRoot,
+      sameWorkspace: options.sameWorkspace ?? true,
+    };
   }
   if (binding?.changeId) {
     return {
@@ -576,6 +736,8 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
         requirementGate: Boolean(gate),
         events: events.length,
       },
+      workspaceRoot,
+      sameWorkspace: options.sameWorkspace ?? true,
     };
   }
   if (binding?.workUnitId) {
@@ -596,6 +758,8 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
         ...boundWorkUnitTarget,
         changeId: boundWorkUnitTarget.changeId ?? binding.changeId ?? null,
         title: boundWorkUnitTarget.title ?? binding.title ?? null,
+        workspaceRoot,
+        sameWorkspace: options.sameWorkspace ?? true,
       };
     }
   }
@@ -619,18 +783,22 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
   };
   const taskHandle = extractFirstSelectorMatch(texts, CONTINUATION_TASK_HANDLE_PATTERN);
   if (taskHandle) {
-    return resolveTaskHandleTarget(taskHandle, index, loopFeatureList, {
+    return {
+      ...(resolveTaskHandleTarget(taskHandle, index, loopFeatureList, {
       source: 'session',
       sessionId,
       promptPreview,
       artifacts,
       reason: `会话 ${sessionId} 的本地记录命中任务句柄 ${taskHandle}。`,
-    });
+      }) ?? {}),
+      workspaceRoot,
+      sameWorkspace: options.sameWorkspace ?? true,
+    };
   }
   const workUnitId = gate?.reviewActionAuthorization?.workUnitId
     ?? extractFirstSelectorMatch(texts, CONTINUATION_WORK_UNIT_PATTERN);
   if (workUnitId) {
-    return resolveWorkUnitTarget(projectRoot, workUnitId, index, {
+    const resolvedWorkUnitTarget = await resolveWorkUnitTarget(projectRoot, workUnitId, index, {
       source: 'session',
       sessionId,
       promptPreview,
@@ -638,6 +806,11 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
       query: texts.join(' '),
       reason: `会话 ${sessionId} 的本地记录命中工作单元 ${workUnitId}。`,
     });
+    return {
+      ...resolvedWorkUnitTarget,
+      workspaceRoot,
+      sameWorkspace: options.sameWorkspace ?? true,
+    };
   }
   const semanticMatch = resolveSemanticTarget(texts.join(' '), index, {
     source: 'session',
@@ -647,7 +820,11 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
     reason: `会话 ${sessionId} 的本地 requirement / hook 历史命中已有任务对象。`,
   });
   if (semanticMatch) {
-    return semanticMatch;
+    return {
+      ...semanticMatch,
+      workspaceRoot,
+      sameWorkspace: options.sameWorkspace ?? true,
+    };
   }
   return {
     matched: false,
@@ -663,7 +840,80 @@ async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureLi
       ? `本地找到了会话 ${sessionId} 的 requirement gate / hook 事件，但还没有足够证据绑定到具体 change/task/work unit。`
       : `本地没有会话 ${sessionId} 的 requirement gate、hook 事件或 work unit 绑定。`,
     artifacts,
+    workspaceRoot,
+    sameWorkspace: options.sameWorkspace ?? true,
   };
+}
+
+async function resolveSessionTarget(projectRoot, sessionId, index, loopFeatureList, options = {}) {
+  const registryEntry = await readSessionRegistryEntry(sessionId, options).catch(() => null);
+  if (registryEntry?.workspaceRoot && !rootsEqual(registryEntry.workspaceRoot, projectRoot)) {
+    const targetArtifacts = await options.resolveWorkspaceArtifacts?.(registryEntry.workspaceRoot) ?? {
+      index,
+      loopFeatureList: await readLoopFeatureList(registryEntry.workspaceRoot),
+    };
+    const resolved = await resolveSessionTargetInWorkspace(
+      registryEntry.workspaceRoot,
+      sessionId,
+      targetArtifacts.index ?? index,
+      targetArtifacts.loopFeatureList ?? loopFeatureList,
+      { sameWorkspace: false },
+    );
+    return {
+      ...resolved,
+      workspaceRoot: registryEntry.workspaceRoot,
+      registryEntry,
+      reason: [
+        `全局 session registry 已把会话 ${sessionId} 归属到 ${registryEntry.workspaceRoot}。`,
+        resolved.reason,
+      ].filter(Boolean).join(' '),
+    };
+  }
+
+  const localResolution = await resolveSessionTargetInWorkspace(projectRoot, sessionId, index, loopFeatureList, {
+    sameWorkspace: true,
+  });
+  if (localResolution.matched || registryEntry) {
+    return {
+      ...localResolution,
+      registryEntry,
+    };
+  }
+
+  const candidates = await findSessionWorkspaceCandidates(projectRoot, sessionId, options);
+  if (candidates.length === 1) {
+    const candidate = candidates[0];
+    const targetArtifacts = await options.resolveWorkspaceArtifacts?.(candidate.workspaceRoot) ?? {
+      index,
+      loopFeatureList: await readLoopFeatureList(candidate.workspaceRoot),
+    };
+    const resolved = await resolveSessionTargetInWorkspace(
+      candidate.workspaceRoot,
+      sessionId,
+      targetArtifacts.index ?? index,
+      targetArtifacts.loopFeatureList ?? loopFeatureList,
+      { sameWorkspace: false },
+    );
+    return {
+      ...resolved,
+      workspaceRoot: candidate.workspaceRoot,
+      candidates,
+      reason: [
+        `全局 session registry 还没有会话 ${sessionId}，已根据 repo-local 线索定位到候选工作区 ${candidate.workspaceRoot}。`,
+        resolved.reason,
+      ].filter(Boolean).join(' '),
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      ...localResolution,
+      source: 'session-candidates',
+      workspaceRoot: null,
+      candidates,
+      reason: `全局 session registry 还没有会话 ${sessionId}，并且在多个工作区都找到了候选线索：${candidates.map((item) => item.workspaceRoot).join('、')}。`,
+    };
+  }
+  return localResolution;
 }
 
 async function resolveRunTarget({
@@ -672,13 +922,16 @@ async function resolveRunTarget({
   request,
   index,
   loopFeatureList,
+  resolveWorkspaceArtifacts,
 }) {
   const text = String(message ?? '').trim();
   if (!text) {
     return null;
   }
   if (request.sessionId) {
-    return resolveSessionTarget(projectRoot, request.sessionId, index, loopFeatureList);
+    return resolveSessionTarget(projectRoot, request.sessionId, index, loopFeatureList, {
+      resolveWorkspaceArtifacts,
+    });
   }
   if (request.taskHandle) {
     return resolveTaskHandleTarget(request.taskHandle, index, loopFeatureList);
@@ -694,8 +947,8 @@ async function resolveRunTarget({
   return resolveSemanticTarget(text, index);
 }
 
-function selectFocusedChangeId(request, resolvedTarget, activeChange) {
-  if (resolvedTarget?.changeId) {
+function selectFocusedChangeId(projectRoot, request, resolvedTarget, activeChange) {
+  if (resolvedTarget?.changeId && (!resolvedTarget.workspaceRoot || rootsEqual(resolvedTarget.workspaceRoot, projectRoot))) {
     return resolvedTarget.changeId;
   }
   if (request.sessionId || request.taskHandle || request.workUnitId) {
@@ -733,7 +986,7 @@ function describeRunLane(lane) {
   return `继续已有任务 (${selectorLabel}: ${target})`;
 }
 
-function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFeatureList, resolvedTarget }) {
+function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFeatureList, resolvedTarget, projectRoot }) {
   const request = analyzeRunMessage(message);
   if (!request.requested) {
     if (resolvedTarget?.matched) {
@@ -743,6 +996,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
         taskId: resolvedTarget.taskId ?? recommendation?.task?.id ?? null,
         changeId: resolvedTarget.changeId ?? recommendation?.changeId ?? null,
         workUnitId: resolvedTarget.workUnitId ?? latestPrd?.workUnitId ?? null,
+        workspaceRoot: resolvedTarget.workspaceRoot ?? projectRoot,
       };
       const lane = {
         kind: 'targeted',
@@ -753,6 +1007,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
         matched: Boolean(target.sessionId || target.taskHandle || target.taskId || target.changeId || target.workUnitId),
         resolution: resolvedTarget,
         activeChange,
+        currentProjectRoot: projectRoot,
       };
       return {
         ...lane,
@@ -776,6 +1031,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
       taskId: resolvedTarget?.taskId ?? null,
       changeId: resolvedTarget?.changeId ?? null,
       workUnitId: resolvedTarget?.workUnitId ?? null,
+      workspaceRoot: resolvedTarget?.workspaceRoot ?? projectRoot,
     };
     matched = Boolean(resolvedTarget?.matched);
   } else if (request.selectorType === 'task-handle') {
@@ -785,6 +1041,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
       taskId: resolvedTarget?.taskId ?? matchedLoopTask?.id ?? null,
       changeId: resolvedTarget?.changeId ?? matchedLoopTask?.changeId ?? null,
       workUnitId: resolvedTarget?.workUnitId ?? null,
+      workspaceRoot: resolvedTarget?.workspaceRoot ?? projectRoot,
     };
     matched = Boolean(resolvedTarget?.matched || matchedLoopTask);
   } else if (request.selectorType === 'work-unit') {
@@ -794,6 +1051,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
       taskId: resolvedTarget?.taskId ?? null,
       changeId: resolvedTarget?.changeId ?? null,
       workUnitId: resolvedTarget?.workUnitId ?? request.workUnitId ?? null,
+      workspaceRoot: resolvedTarget?.workspaceRoot ?? projectRoot,
     };
     matched = Boolean(resolvedTarget?.matched);
   } else {
@@ -803,6 +1061,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
       taskId: recommendation?.task?.id ?? null,
       changeId: recommendation?.changeId ?? activeChange ?? null,
       workUnitId: latestPrd?.workUnitId ?? null,
+      workspaceRoot: projectRoot,
     };
     matched = Boolean(target.taskHandle || target.taskId || target.changeId || target.workUnitId);
   }
@@ -812,6 +1071,7 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
     matched,
     resolution: resolvedTarget ?? null,
     activeChange,
+    currentProjectRoot: projectRoot,
   };
   return {
     ...lane,
@@ -821,6 +1081,8 @@ function buildRunLane({ message, recommendation, activeChange, latestPrd, loopFe
 
 function buildSessionContinuationRecommendation(recommendation, lane) {
   const sessionId = lane?.target?.sessionId ?? lane?.sessionId ?? lane?.selector ?? null;
+  const targetWorkspaceRoot = lane?.target?.workspaceRoot ?? lane?.resolution?.workspaceRoot ?? lane?.currentProjectRoot ?? null;
+  const crossWorkspace = Boolean(targetWorkspaceRoot && lane?.currentProjectRoot && !rootsEqual(targetWorkspaceRoot, lane.currentProjectRoot));
   const recoveredTarget = [
     lane?.target?.changeId ? `变更 ${lane.target.changeId}` : null,
     lane?.target?.taskHandle ? `任务句柄 ${lane.target.taskHandle}` : null,
@@ -830,11 +1092,16 @@ function buildSessionContinuationRecommendation(recommendation, lane) {
     type: 'session-continuation',
     title: sessionId ? `恢复历史会话 ${sessionId}` : '恢复历史会话',
     command: sessionId
-      ? `openprd run . --context --message ${shellQuote(sessionId)}`
+      ? (
+          crossWorkspace
+            ? `openprd run ${shellQuote(targetWorkspaceRoot)} --context --message ${shellQuote(sessionId)}`
+            : `openprd run . --context --message ${shellQuote(sessionId)}`
+        )
       : 'openprd run . --context',
     verifyCommand: 'openprd run . --verify',
     reason: [
-      '当前请求给出的是工具无关的会话 ID；先按本地会话索引恢复该会话历史，再决定后续任务对象。',
+      '当前请求给出的是工具无关的会话 ID；先按全局 session registry 和 repo-local 线索恢复该会话历史，再决定后续任务对象。',
+      crossWorkspace ? `该会话归属到工作区 ${targetWorkspaceRoot}，不能继续复用当前工作区的 active 状态。` : null,
       recoveredTarget ? `本地已恢复到 ${recoveredTarget}。` : (lane?.resolution?.reason ?? '本地还没有足够证据把这个会话绑定到具体 change/task/work unit。'),
       lane?.resolution?.promptPreview ? `会话摘要: ${lane.resolution.promptPreview}` : null,
       '不能用相似历史、当前 active change 或当前 requirement gate 替代这个会话 ID。',
@@ -852,6 +1119,11 @@ function buildSessionContinuationRecommendation(recommendation, lane) {
       : null,
     coverageItem: null,
     continuationTarget: lane.target ?? null,
+    isolation: {
+      required: true,
+      worktreeRecommended: true,
+      reason: crossWorkspace ? '跨工作区恢复时先回到正确 workspace，再在隔离环境里继续实现。' : '历史会话恢复默认建议使用独立 session / cwd，避免共享执行线内容。',
+    },
     previousRecommendation: recommendation
       ? {
           type: recommendation.type ?? null,
@@ -881,6 +1153,9 @@ function buildUnresolvedContinuationRecommendation({ message, request, resolutio
       `当前请求显式给出了${selectorLabel}，但本地 OpenPrd 索引还不能把它精确绑定到 change/task/work unit。`,
       resolution?.reason ?? null,
       activeChange ? `当前工作区 active change ${activeChange} 只作为背景提醒，不会自动顶替这个显式目标。` : null,
+      Array.isArray(resolution?.candidates) && resolution.candidates.length > 0
+        ? `候选工作区: ${resolution.candidates.map((item) => item.workspaceRoot).join('、')}。`
+        : null,
     ].filter(Boolean).join(' '),
     changeId: null,
     task: null,
@@ -1012,6 +1287,7 @@ function buildRequirementIntakeRecommendation({ gate, next, activeChange }) {
 }
 
 function buildRunRecommendation({
+  projectRoot,
   message,
   changes,
   activeChange,
@@ -1044,6 +1320,29 @@ function buildRunRecommendation({
     const pendingTasks = Number(taskState.summary?.pending ?? 0);
     const implementationTasks = Number(taskState.summary?.implementation?.total ?? 0);
     const pendingImplementationTasks = Number(taskState.summary?.implementation?.pending ?? 0);
+    const laneRequiresIsolation = Boolean(
+      resolvedTarget?.workspaceRoot && !rootsEqual(resolvedTarget.workspaceRoot, projectRoot)
+        || ['session', 'task-handle', 'work-unit'].includes(laneRequest?.selectorType ?? '')
+    );
+    const executionMode = laneRequiresIsolation
+      ? 'parallel-workers-isolated'
+      : (
+      implementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
+      || pendingImplementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
+    )
+      ? 'parallel-workers-isolated'
+      : (
+          implementationTasks >= OPENPRD_PARALLEL_WORKER_IMPLEMENTATION_TASK_THRESHOLD
+          || pendingImplementationTasks >= OPENPRD_PARALLEL_WORKER_IMPLEMENTATION_TASK_THRESHOLD
+        )
+          ? 'parallel-workers'
+          : 'serial';
+    const parallelPlan = buildParallelPlan({
+      executionMode,
+      taskState,
+      focusTask: task,
+      worktreeRecommended: laneRequiresIsolation || executionMode === 'parallel-workers-isolated',
+    });
     if (
       implementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
       || pendingImplementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
@@ -1061,11 +1360,15 @@ function buildRunRecommendation({
           : `openprd loop . --plan --change ${shellQuote(taskState.changeId)} && openprd loop . --run --agent codex --item ${shellQuote(task.id)}`,
         commitCommand: `openprd loop . --finish --item ${shellQuote(task.id)} --commit`,
         verifyCommand: `openprd loop . --verify --item ${shellQuote(task.id)}`,
-        reason: `当前变更包含 ${implementationTasks} 个实质实现任务，达到 ${OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD} 个实现任务的拆分阈值；建议使用独立 worktree 和 OpenPrd Loop 单任务会话，且只有用户明确要求开发、继续任务或深度对标落地时才执行。`,
+        reason: laneRequiresIsolation
+          ? '当前执行焦点来自显式恢复或跨线定位；默认建议使用独立 worktree 和 OpenPrd Loop 单任务会话，避免与其他需求线共享执行状态。'
+          : `当前变更包含 ${implementationTasks} 个实质实现任务，达到 ${OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD} 个实现任务的拆分阈值；建议使用独立 worktree 和 OpenPrd Loop 单任务会话，且只有用户明确要求开发、继续任务或深度对标落地时才执行。`,
         changeId: taskState.changeId,
         task,
         coverageItem: null,
         intentGate: executionGate(),
+        executionMode,
+        parallelPlan,
         loop: {
           required: true,
           threshold: OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD,
@@ -1078,17 +1381,27 @@ function buildRunRecommendation({
         },
       };
     }
+    const lightweightReason = laneRequiresIsolation
+      ? '当前任务来自显式恢复或跨线定位，默认建议使用隔离 session / cwd 或独立 worktree，避免共享 active 执行线。'
+      : executionMode === 'parallel-workers'
+        ? `当前变更还有 ${pendingImplementationTasks} 个待处理的实质实现任务，已达到 ${OPENPRD_PARALLEL_WORKER_IMPLEMENTATION_TASK_THRESHOLD} 个并行候选阈值，但尚未达到独立隔离阈值 ${OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD}；建议由主 Agent 分派边界清晰的 worker shard，并在主线程统一 review、integrate 和总验证。`
+        : '存在一个依赖已就绪的 OpenPrd 任务；只有用户明确要求开发、实现或继续任务时才推进。';
     return {
       type: 'task',
       title: `推进 ${task.id}: ${task.title}`,
       command: `openprd tasks . --change ${shellQuote(taskState.changeId)}`,
+      preparationCommand: executionMode === 'parallel-workers'
+        ? `openprd loop . --plan --change ${shellQuote(taskState.changeId)}`
+        : null,
       executionCommand: `openprd tasks . --change ${shellQuote(taskState.changeId)} --advance --verify --item ${shellQuote(task.id)}`,
       verifyCommand: task.verify ?? `openprd tasks . --change ${shellQuote(taskState.changeId)} --verify --item ${shellQuote(task.id)}`,
-      reason: '存在一个依赖已就绪的 OpenPrd 任务；只有用户明确要求开发、实现或继续任务时才推进。',
+      reason: lightweightReason,
       changeId: taskState.changeId,
       task,
       coverageItem: null,
       intentGate: executionGate(),
+      executionMode,
+      parallelPlan,
       loop: {
         required: false,
         threshold: OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD,
@@ -1096,7 +1409,7 @@ function buildRunRecommendation({
         pendingTasks,
         implementationTasks,
         pendingImplementationTasks,
-        worktreeRecommended: false,
+        worktreeRecommended: laneRequiresIsolation,
       },
     };
   }
@@ -1188,11 +1501,25 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
         status: next.analysisSnapshot.status ?? null,
       }
     : null;
-  const loopFeatureList = await readJson(harnessFile(projectRoot, OPENPRD_HARNESS_LOOP_FEATURE_LIST)).catch(() => null);
+  const resolutionCache = new Map();
+  async function resolveWorkspaceArtifacts(targetProjectRoot) {
+    const key = path.resolve(targetProjectRoot);
+    if (resolutionCache.has(key)) {
+      return resolutionCache.get(key);
+    }
+    const targetChanges = await listOpenPrdChangesWorkspace(targetProjectRoot).catch(() => null);
+    const artifacts = {
+      changes: targetChanges,
+      index: await buildRunResolutionIndex(targetProjectRoot, targetChanges, listOpenSpecTaskWorkspace).catch(() => null),
+      loopFeatureList: await readLoopFeatureList(targetProjectRoot),
+    };
+    resolutionCache.set(key, artifacts);
+    return artifacts;
+  }
+  const currentWorkspaceArtifacts = await resolveWorkspaceArtifacts(projectRoot);
+  const loopFeatureList = currentWorkspaceArtifacts.loopFeatureList;
   const shouldResolveTarget = Boolean(String(options.message ?? '').trim());
-  const resolutionIndex = shouldResolveTarget
-    ? await buildRunResolutionIndex(projectRoot, changes, listOpenSpecTaskWorkspace)
-    : null;
+  const resolutionIndex = shouldResolveTarget ? currentWorkspaceArtifacts.index : null;
   const resolvedTarget = shouldResolveTarget
     ? await resolveRunTarget({
         projectRoot,
@@ -1200,15 +1527,17 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
         request: laneRequest,
         index: resolutionIndex,
         loopFeatureList,
+        resolveWorkspaceArtifacts,
       })
     : null;
-  const focusedChangeId = selectFocusedChangeId(laneRequest, resolvedTarget, activeChange);
+  const focusedChangeId = selectFocusedChangeId(projectRoot, laneRequest, resolvedTarget, activeChange);
   const taskState = focusedChangeId
     ? await listOpenSpecTaskWorkspace(projectRoot, { change: focusedChangeId }).catch(() => null)
     : null;
   const resumedDiscovery = await resumeOpenSpecDiscoveryWorkspace(projectRoot).catch(() => null);
   const discovery = shouldSurfaceDiscoveryInRunContext(resumedDiscovery) ? resumedDiscovery : null;
   const recommendation = buildRunRecommendation({
+    projectRoot,
     message: options.message,
     changes,
     activeChange,
@@ -1229,8 +1558,9 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     latestPrd,
     loopFeatureList,
     resolvedTarget,
+    projectRoot,
   });
-  const effectiveRecommendation = applyLaneToRecommendation(recommendation, lane);
+  const effectiveRecommendation = withExecutionConfirmationChecklist(applyLaneToRecommendation(recommendation, lane));
 
   const context = {
     ok: validation.valid,
@@ -1267,6 +1597,7 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     focus: {
       changeId: focusedChangeId,
       source: resolvedTarget?.source ?? null,
+      workspaceRoot: resolvedTarget?.workspaceRoot ?? projectRoot,
       sessionId: resolvedTarget?.sessionId ?? lane.target?.sessionId ?? null,
       taskHandle: resolvedTarget?.taskHandle ?? null,
       workUnitId: resolvedTarget?.workUnitId ?? null,

@@ -70,7 +70,14 @@
       "user-preference",
       "workflow-gotcha",
       "standards-rule"
-    ]
+    ],
+    "autoApply": {
+      "enabled": true,
+      "minConfidence": 0.8,
+      "safeTypes": [
+        "code-extension"
+      ]
+    }
   },
   "externalReferences": {
     "paths": []

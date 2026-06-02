@@ -1,13 +1,37 @@
+/*
+ * 核心功能
+ * 编排 OpenPrd loop 的规划、提示词生成、Agent 子会话运行、finish 和回归报告。
+ *
+ * 输入
+ * 接收项目路径、change/task 选择、Agent 类型、执行/修复参数和 loop 状态文件。
+ *
+ * 输出
+ * 写入 loop prompt、session 事件、进度状态和测试报告，并导出 loop workspace 函数。
+ *
+ * 定位
+ * 位于 OpenPrd 长程单任务执行层，连接 OpenSpec task、quality、learning review 与 Agent runtime。
+ *
+ * 依赖
+ * 依赖 openspec、quality、learning-review、knowledge、html-artifacts 和 codex-runtime 模块。
+ *
+ * 维护规则
+ * 新增执行入口必须保持 dry-run 可见、失败可诊断；真实 Codex 子会话启动前需保留 runtime preflight。
+ */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { buildTaskCommitMessage } from './change-summary.js';
+import { ensureCodexCliReady } from './codex-runtime.js';
+import { describeExecutionStrategy, labelOwnerRole, taskExecutionStrategy } from './execution-strategy.js';
 import { defaultRegressionArtifactPath, renderRegressionArtifact, writeHtmlArtifact } from './html-artifacts.js';
 import { OPENPRD_HARNESS_TURN_STATE, recordKnowledgeReviewSignal, reviewKnowledgeWorkspace } from './knowledge.js';
 import { generateLearningReviewWorkspace } from './learning-review.js';
 import { listOpenSpecTaskWorkspace, advanceOpenSpecTaskWorkspace, verifyOpenSpecTaskWorkspace } from './openspec/execute.js';
 import { validateOpenSpecChangeWorkspace } from './openspec/change-validate.js';
 import { verifyQualityWorkspace } from './quality.js';
+import { appendReleaseEntry, getCurrentReleaseEntry, loadReleaseLedger, saveReleaseLedger, updateReleaseTag } from './release-ledger.js';
+import { describeTestStrategy, taskTestStrategy } from './test-strategy.js';
 import { timestamp } from './time.js';
 
 const LOOP_FEATURE_LIST = path.join('.openprd', 'harness', 'feature-list.json');
@@ -207,6 +231,8 @@ async function appendFailedApproach(projectRoot, payload) {
 function featureTaskFromOpenSpecTask(task, changeId) {
   const deps = taskDeps(task);
   const taskSlug = slugifyLoopToken(task.title ?? task.id ?? 'task', 'task');
+  const testStrategy = taskTestStrategy(task);
+  const executionStrategy = taskExecutionStrategy(task);
   return {
     id: task.id,
     title: task.title,
@@ -222,13 +248,22 @@ function featureTaskFromOpenSpecTask(task, changeId) {
     done: task.metadata?.done ?? null,
     verify: task.metadata?.verify ?? null,
     oracle: task.metadata?.oracle ?? null,
-    commitMessage: `Complete ${task.id}: ${task.title}`,
+    testStrategy,
+    testStrategyDescription: describeTestStrategy(testStrategy),
+    executionStrategy,
+    executionStrategyDescription: describeExecutionStrategy(executionStrategy),
+    commitMessage: buildTaskCommitMessage(task),
     sessionScope: [
       '只处理这个任务，不要在同一会话继续下一个任务。',
       '完成代码后必须先自测，失败就修复并重新自测。',
-      '代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`；若出现 attention 或 warning，说明局部职责、影响范围，以及是否已拆分或为什么窄修暂不拆。',
+      '代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`；若出现需要关注的文件，最终回复直接复用 dev-check 生成的 **后续建议** 表格说明影响对象、关注程度、本次处理结果和后续建议，并保留“关注程度”列里的完整风险标签，不要缩成纯 emoji；如果你改写了“预警原因 / 本次处理结果 / 后续建议”，先用 `node scripts/dev-check-wrapup-copy.mjs --validate` 校验每格不超过 20 字；若报错，按提示缩短后重试。',
       '涉及前端界面时，在 Codex 客户端优先使用 Computer Use；在 Codex CLI 或 Claude Code 中优先使用 Playwright、MCP 或等价浏览器自动化。',
       '纯后端、脚本或库任务使用最贴近项目的脚本、单测、集成测试或命令行验证。',
+      `本任务测试策略: ${describeTestStrategy(testStrategy)}`,
+      `本任务执行策略: ${describeExecutionStrategy(executionStrategy)}`,
+      executionStrategy.ownerRole === 'worker'
+        ? `当前会话角色: ${labelOwnerRole(executionStrategy.ownerRole)}；写入范围限制为 ${executionStrategy.writeScope.join(', ')}，最终集成和总验证由主 Agent 负责。`
+        : `当前会话角色: ${labelOwnerRole(executionStrategy.ownerRole)}；由主 Agent 直接推进并负责最终集成。`,
       '涉及后端、脚本、Agent、工具链、服务或数据处理变更时，把 CLI 与 API 视为同级接入面；检查命令入口、参数、输出契约、`help`/`doctor`/`dry-run`/`status` 与接口协议、返回结构、身份边界是否受影响，并同步更新 `docs/basic/backend-structure.md`；若某一面不适用也要明确写原因。',
       '新增或修改文件时先做文档影响判定：缺少 docs/basic、文件说明书或文件夹 README 就补齐；已有文档若因本任务职责、流程、结构、依赖或产品行为变化而过期，就同步更新。',
     ],
@@ -402,6 +437,12 @@ function renderLoopPrompt({ agent, projectRoot, featureList, task, dependency, m
     `跨对话继续请引用: ${task.taskHandle}`,
     `完成条件: ${task.done ?? '未指定'}`,
     `自测命令: ${task.verify ?? '未指定'}`,
+    `测试策略: ${task.testStrategyDescription ?? describeTestStrategy(taskTestStrategy(task))}`,
+    `执行策略: ${task.executionStrategyDescription ?? describeExecutionStrategy(task.executionStrategy ?? taskExecutionStrategy(task))}`,
+    `当前角色: ${labelOwnerRole(task.executionStrategy?.ownerRole ?? taskExecutionStrategy(task).ownerRole)}`,
+    `写入范围: ${(task.executionStrategy?.writeScope ?? taskExecutionStrategy(task).writeScope).join(', ')}`,
+    `局部验证: ${task.executionStrategy?.localVerify ?? taskExecutionStrategy(task).localVerify}`,
+    `最终集成 owner: ${task.executionStrategy?.integrationOwner ?? taskExecutionStrategy(task).integrationOwner}`,
     `对照基准: ${task.oracle ?? '未指定'}`,
     `依赖是否就绪: ${dependency?.ready ? '是' : '否'}`,
     dependency?.missing?.length ? `缺失依赖: ${dependency.missing.join(', ')}` : '',
@@ -410,18 +451,19 @@ function renderLoopPrompt({ agent, projectRoot, featureList, task, dependency, m
     '',
     '不要开始下一个任务。如果发现任务仍然过大，先拆分任务文件，并只完成最小可用切片。',
     task.oracle ? '如果任务定义了对照基准，必须显式对照 reference/oracle，并把偏差、死路或替代方案记到 `.openprd/harness/failed-approaches.md`。' : '',
-    '代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`；若出现 attention 或 warning，说明局部职责、影响范围，以及是否已拆分或为什么窄修暂不拆。',
+    '代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`；若出现需要关注的文件，最终回复直接复用 dev-check 生成的 **后续建议** 表格说明影响对象、关注程度、本次处理结果和后续建议，并保留“关注程度”列里的完整风险标签，不要缩成纯 emoji；如果你改写了“预警原因 / 本次处理结果 / 后续建议”，先用 `node scripts/dev-check-wrapup-copy.mjs --validate` 校验每格不超过 20 字；若报错，按提示缩短后重试。',
     '',
     '## 自测与界面验证要求',
     '',
-    '1. 必须运行本任务的自测命令。',
-    '2. 必须运行 `openprd run . --verify`。',
+    '1. 先按本任务测试策略选择最小足够证据：小范围逻辑优先单测，契约/跨模块用集成，用户主路径或运行态用端到端/专项验证。',
+    '2. 必须运行本任务的自测命令，并把结果作为 task-scoped evidence 记录。',
+    '3. 不要在每个 task 中运行全局 `openprd run . --verify`；它只用于无下一任务的阶段收口或高风险动作前。',
     ...frontendStrategy,
-    '5. 阶段性测试报告会由 `openprd loop . --finish` 写入 `.openprd/harness/test-reports/`，并与本任务改动一起进入 commit。',
+    '6. 阶段性测试报告会由 `openprd loop . --finish` 写入 `.openprd/harness/test-reports/`，并与本任务改动一起进入 commit。',
     '',
     '## 收尾步骤',
     '',
-    '1. 确认自测、界面验证和 OpenPrd verify 都已经通过。',
+    '1. 确认本任务自测、界面验证和 evidence 记录都已经通过。',
     '2. 留下简洁总结，说明改动文件和验证结果。',
     '3. 如果这是手动执行 prompt，用以下命令结束任务并提交:',
     task.oracle
@@ -444,6 +486,8 @@ function renderLoopPrompt({ agent, projectRoot, featureList, task, dependency, m
         done: task.done,
         verify: task.verify,
         oracle: task.oracle,
+        testStrategy: task.testStrategy ?? taskTestStrategy(task),
+        executionStrategy: task.executionStrategy ?? taskExecutionStrategy(task),
       },
     }, null, 2),
     '',
@@ -494,6 +538,158 @@ async function gitCommit(projectRoot, message) {
     message: '已提交',
     sha: rev.stdout.trim() || null,
     commit,
+  };
+}
+
+async function gitCheckTagName(projectRoot, tagName) {
+  return runCommand('git', ['check-ref-format', '--allow-onelevel', `refs/tags/${tagName}`], { cwd: projectRoot });
+}
+
+async function gitReadLocalTagSha(projectRoot, tagName) {
+  const result = await runCommand('git', ['rev-parse', '-q', '--verify', `refs/tags/${tagName}`], { cwd: projectRoot });
+  if (!result.ok) return null;
+  return result.stdout.trim() || null;
+}
+
+async function gitReadRemoteTagSha(projectRoot, tagName) {
+  const remote = await runCommand('git', ['remote', 'get-url', 'origin'], { cwd: projectRoot });
+  if (!remote.ok) {
+    return { status: 'no-remote', sha: null, warning: null };
+  }
+  const result = await runCommand('git', ['ls-remote', '--tags', '--refs', 'origin', `refs/tags/${tagName}`], { cwd: projectRoot });
+  if (!result.ok) {
+    return {
+      status: 'unknown',
+      sha: null,
+      warning: `无法确认远端 tag ${tagName} 的状态；本地 tag 仍会按当前 commit 更新。`,
+    };
+  }
+  const line = result.stdout.trim();
+  if (!line) {
+    return { status: 'absent', sha: null, warning: null };
+  }
+  return { status: 'present', sha: line.split(/\s+/u)[0] ?? null, warning: null };
+}
+
+async function syncLocalVersionTag(projectRoot, version, sha) {
+  const tagName = String(version ?? '').trim();
+  if (!tagName || !sha) {
+    return { ok: true, skipped: true, tagName: tagName || null, warning: null };
+  }
+
+  const valid = await gitCheckTagName(projectRoot, tagName);
+  if (!valid.ok) {
+    return {
+      ok: false,
+      skipped: true,
+      tagName,
+      warning: `项目版本 ${tagName} 不能安全地作为 git tag 名称；已跳过本地 tag 更新。`,
+    };
+  }
+
+  const localSha = await gitReadLocalTagSha(projectRoot, tagName);
+  const remote = await gitReadRemoteTagSha(projectRoot, tagName);
+  if (remote.status === 'present' && remote.sha && remote.sha !== sha) {
+    return {
+      ok: false,
+      skipped: true,
+      tagName,
+      localSha,
+      remoteSha: remote.sha,
+      remoteStatus: remote.status,
+      warning: `远端已有同名 tag ${tagName} 指向 ${remote.sha.slice(0, 7)}；为避免改写历史，已跳过本地 tag 移动。`,
+    };
+  }
+
+  if (localSha === sha) {
+    return {
+      ok: true,
+      skipped: false,
+      tagName,
+      localSha,
+      remoteSha: remote.sha,
+      remoteStatus: remote.status,
+      warning: remote.warning,
+    };
+  }
+
+  const command = localSha ? ['tag', '-f', tagName, sha] : ['tag', tagName, sha];
+  const result = await runCommand('git', command, { cwd: projectRoot });
+  if (!result.ok) {
+    return {
+      ok: false,
+      skipped: true,
+      tagName,
+      localSha,
+      remoteSha: remote.sha,
+      remoteStatus: remote.status,
+      warning: `git tag ${tagName} 更新失败：${trimOutput(result.stderr || result.stdout)}`,
+    };
+  }
+
+  const nextLocalSha = await gitReadLocalTagSha(projectRoot, tagName);
+  return {
+    ok: true,
+    skipped: false,
+    tagName,
+    localSha: nextLocalSha,
+    remoteSha: remote.sha,
+    remoteStatus: remote.status,
+    warning: remote.warning,
+  };
+}
+
+async function updateReleaseLedgerAfterFinish(projectRoot, task, commitSha = null) {
+  const loaded = await loadReleaseLedger(projectRoot);
+  const current = getCurrentReleaseEntry(loaded.ledger);
+  if (!loaded.ledger.enabled || !current?.version) {
+    return null;
+  }
+  if (current.status === 'released') {
+    return {
+      version: current.version,
+      skipped: true,
+      warnings: [`项目版本 ${current.version} 已标记为 released；本次任务不会自动累计到这个版本。`],
+      tag: null,
+    };
+  }
+
+  let ledger = loaded.ledger;
+  const appended = appendReleaseEntry(ledger, task.done ?? task.title ?? task.id, {
+    version: current.version,
+    fallbackType: '调整',
+    source: {
+      kind: 'loop-finish',
+      changeId: task.changeId ?? null,
+      taskId: task.id ?? null,
+      taskHandle: task.taskHandle ?? null,
+      commitSha: commitSha ?? null,
+    },
+  });
+  ledger = appended.ledger;
+
+  let tag = null;
+  if (commitSha) {
+    tag = await syncLocalVersionTag(projectRoot, current.version, commitSha);
+    const tagged = updateReleaseTag(ledger, {
+      version: current.version,
+      name: tag.tagName ?? current.version,
+      localSha: tag.localSha ?? null,
+      remoteSha: tag.remoteSha ?? null,
+      remoteStatus: tag.remoteStatus ?? null,
+      warning: tag.warning ?? null,
+      updatedAt: timestamp(),
+    });
+    ledger = tagged.ledger;
+  }
+
+  await saveReleaseLedger(projectRoot, ledger);
+  return {
+    version: current.version,
+    skipped: false,
+    added: appended.added,
+    warnings: tag?.warning ? [tag.warning] : [],
+    tag,
   };
 }
 
@@ -558,6 +754,7 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
     kind: inferUiVerificationHint(task, agent).includes('前端界面任务') ? 'ui-regression' : 'command-regression',
     verifyCommand: advanced.verification?.command ?? task.verify ?? '未指定',
     oracle: task.oracle ?? null,
+    testStrategy: task.testStrategy ?? taskTestStrategy(task),
     summary: {
       total: 1,
       passed: advanced.verification?.ok ? 1 : 0,
@@ -585,6 +782,7 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
     `- 变更: ${task.changeId}`,
     `- 完成条件: ${task.done ?? '未指定'}`,
     `- 自测命令: ${advanced.verification?.command ?? task.verify ?? '未指定'}`,
+    `- 测试策略: ${task.testStrategyDescription ?? describeTestStrategy(task.testStrategy ?? taskTestStrategy(task))}`,
     `- 对照基准: ${task.oracle ?? '未指定'}`,
     `- 自测结果: ${advanced.verification?.ok ? '通过' : '失败或未运行'}`,
     `- Change 校验: ${change.ok ? '通过' : '失败'}`,
@@ -645,6 +843,8 @@ export async function initLoopWorkspace(projectRoot, options = {}) {
       requireVerify: true,
       requireCommit: true,
       continuity: 'files-and-git-history',
+      executionModes: ['serial', 'parallel-workers', 'parallel-workers-isolated'],
+      coordinationRule: 'main-agent assigns bounded worker shards and owns final review/integration',
     },
     source: 'openprd loop init',
     tasks: [],
@@ -695,6 +895,9 @@ export async function planLoopWorkspace(projectRoot, options = {}) {
       continuity: 'files-and-git-history',
       agentSessionRule: 'start a new Codex or Claude session for exactly one task',
       testReportRule: 'write one staged test report before each task commit',
+      executionModes: ['serial', 'parallel-workers', 'parallel-workers-isolated'],
+      coordinationRule: 'main-agent assigns bounded worker shards and owns final review/integration',
+      workerContract: ['write-scope', 'owner-role', 'local-verify', 'integration-owner'],
     },
     tasks,
   };
@@ -998,6 +1201,16 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     }
   }
 
+  const projectRelease = await updateReleaseLedgerAfterFinish(
+    projectRoot,
+    task,
+    commit && !commit.skipped ? commit.sha : null,
+  ).catch((error) => ({
+    skipped: true,
+    warnings: [error instanceof Error ? error.message : String(error)],
+    tag: null,
+  }));
+
   const updatedList = updateTask(featureList, task.id, {
     status: 'done',
     lastVerifiedAt: timestamp(),
@@ -1118,6 +1331,9 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
       ? null
       : `项目经验草案: ${path.relative(projectRoot, knowledgeReview.files?.draftSkill ?? knowledgeReview.files?.candidateDir ?? '') || '已生成'}。`,
     commit ? `Commit: ${commit.skipped ? '跳过' : commit.sha}` : 'Commit: 未请求。',
+    projectRelease?.version ? `项目版本: ${projectRelease.version}。` : null,
+    projectRelease?.tag?.tagName ? `版本 tag: ${projectRelease.tag.tagName}${projectRelease.tag.localSha ? ` -> ${projectRelease.tag.localSha}` : ''}。` : null,
+    ...(projectRelease?.warnings ?? []).map((warning) => `版本轨道: ${warning}`),
   ]));
   await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
     version: 1,
@@ -1130,6 +1346,7 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     ok: true,
     oracle: task.oracle ?? null,
     commit: commit ? { ok: commit.ok, skipped: commit.skipped, sha: commit.sha ?? null } : null,
+    projectRelease: projectRelease ?? null,
     testReport: testReport.markdownPath,
     regressionHtml: testReport.htmlPath,
     quality: quality
@@ -1183,6 +1400,7 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     advanced,
     change,
     commit,
+    projectRelease,
     testReport: testReport.markdownPath,
     regressionHtml: testReport.htmlPath,
     quality,
@@ -1209,6 +1427,47 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
       shell: true,
     }
     : defaultAgentInvocation(agent, projectRoot, promptResult.promptPath);
+  const codexPreflight = agent === 'codex' && !options.agentCommand && !options.dryRun
+    ? await ensureCodexCliReady({
+      cwd: projectRoot,
+      repair: Boolean(options.repairAgent),
+      runCommand: options.codexRunCommand,
+      packageManager: options.packageManager,
+    })
+    : null;
+
+  if (codexPreflight && !codexPreflight.ok) {
+    await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
+      version: 1,
+      at: timestamp(),
+      action: codexPreflight.repairAttempted ? 'agent-preflight-repair-failed' : 'agent-preflight-failed',
+      agent,
+      taskId: promptResult.task.id,
+      taskHandle: promptResult.task.taskHandle,
+      taskTitle: promptResult.task.title,
+      ok: false,
+      preflight: {
+        ok: codexPreflight.preflight.ok,
+        diagnosticType: codexPreflight.preflight.diagnostic?.type ?? null,
+        missingPackage: codexPreflight.preflight.diagnostic?.missingPackage ?? null,
+        repairAttempted: codexPreflight.repairAttempted,
+      },
+    });
+    return {
+      ok: false,
+      action: 'loop-run',
+      projectRoot,
+      agent,
+      task: promptResult.task,
+      promptPath: promptResult.promptPath,
+      invocation,
+      codexRuntime: codexPreflight,
+      preflight: codexPreflight.preflight,
+      repair: codexPreflight.repair,
+      repairAttempted: codexPreflight.repairAttempted,
+      errors: codexPreflight.errors,
+    };
+  }
 
   const sessionEvent = {
     version: 1,
@@ -1221,6 +1480,11 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     changeId: promptResult.task.changeId,
     promptPath: promptResult.promptPath,
     invocation: invocation.display,
+    preflight: codexPreflight ? {
+      ok: codexPreflight.preflight.ok,
+      command: codexPreflight.preflight.command.display,
+      repairAttempted: codexPreflight.repairAttempted,
+    } : null,
   };
   await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), sessionEvent);
   await updateLoopState(projectRoot, {
@@ -1241,13 +1505,16 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
       task: promptResult.task,
       promptPath: promptResult.promptPath,
       invocation,
+      codexRuntime: codexPreflight,
+      preflight: codexPreflight?.preflight ?? null,
       prompt: promptResult.prompt,
     };
   }
 
+  const runAgentCommand = options.agentRunCommand ?? runCommand;
   const run = invocation.shell
-    ? await runCommand(invocation.command, [], { cwd: projectRoot, shell: true, stdin: prompt })
-    : await runCommand(invocation.command, invocation.args, { cwd: projectRoot, stdin: prompt });
+    ? await runAgentCommand(invocation.command, [], { cwd: projectRoot, shell: true, stdin: prompt })
+    : await runAgentCommand(invocation.command, invocation.args, { cwd: projectRoot, stdin: prompt });
   await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
     version: 1,
     at: timestamp(),
@@ -1284,6 +1551,10 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     agent,
     task: promptResult.task,
     run,
+    codexRuntime: codexPreflight,
+    preflight: codexPreflight?.preflight ?? null,
+    repair: codexPreflight?.repair ?? null,
+    repairAttempted: Boolean(codexPreflight?.repairAttempted),
     finish,
     errors: finish.errors ?? [],
   };

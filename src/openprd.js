@@ -1,32 +1,59 @@
+/*
+ * 核心功能
+ * 汇总 OpenPrd CLI 的命令入口、workspace 函数编排和测试可复用导出。
+ *
+ * 输入
+ * 接收 CLI 参数、项目路径、OpenPrd 工作区文件和各子模块 workspace 结果。
+ *
+ * 输出
+ * 执行 init/setup/update/doctor/run/loop 等命令，打印结果并导出内部 workspace API。
+ *
+ * 定位
+ * 位于 CLI 应用层，负责路由与组合，不承载单个领域的深层业务规则。
+ *
+ * 依赖
+ * 依赖 cli/args、cli/print、agent-integration、loop、standards、quality、openspec 等模块。
+ *
+ * 维护规则
+ * 新增命令或参数时同步更新 usage、打印契约、docs/basic/backend-structure.md 和相关测试。
+ */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { analyzePrdSnapshot, buildPrdSnapshot, formatVersionId } from './prd-core.js';
+import { buildSnapshotChangeSummary } from './change-summary.js';
+import { appendReleaseEntry, buildReleaseChangeSummary, buildReleaseLedgerSummary, loadReleaseLedger, saveReleaseLedger, setCurrentReleaseVersion, setReleaseLedgerEnabled, setReleaseVersionStatus } from './release-ledger.js';
 import { validateOpenSpecChangeWorkspace } from './openspec/change-validate.js';
 import { generateOpenSpecChangeWorkspace as writeOpenSpecChangeWorkspace } from './openspec/generate.js';
-import { advanceOpenSpecTaskWorkspace, listOpenSpecTaskWorkspace, verifyOpenSpecTaskWorkspace } from './openspec/execute.js';
+import { advanceOpenSpecTaskWorkspace, checkOpenSpecTaskEvidenceWorkspace, listOpenSpecTaskWorkspace, verifyOpenSpecTaskWorkspace } from './openspec/execute.js';
+import { ensureCodexCliReady } from './codex-runtime.js';
 import { activateOpenPrdChangeWorkspace, applyOpenPrdChangeWorkspace, archiveOpenPrdChangeWorkspace, closeOpenPrdChangeWorkspace, listAcceptedSpecsWorkspace, listOpenPrdChangesWorkspace } from './openspec/change-lifecycle.js';
 import { checkStandardsWorkspace, classifyExternalReferenceWorkspace, initStandardsWorkspace } from './standards.js';
 import { doctorOpenPrdAgentIntegration, setupOpenPrdAgentIntegration, updateOpenPrdAgentIntegration } from './agent-integration.js';
 import { finishLoopWorkspace, initLoopWorkspace, nextLoopWorkspace, planLoopWorkspace, promptLoopWorkspace, runLoopWorkspace, statusLoopWorkspace, verifyLoopWorkspace } from './loop.js';
 import { timestamp } from './time.js';
 import { parseCommandArgs, usage } from './cli/args.js';
-import { printAcceptedSpecsResult, printAgentIntegrationResult, printBenchmarkResult, printCaptureResult, printClarifyResult, printClassifyResult, printDevelopmentStandardsResult, printDiagramResult, printDiffResult, printDoctorResult, printFleetResult, printFreezeResult, printGrowthResult, printHandoffResult, printHistoryResult, printInitResult, printInterviewResult, printLearningResult, printLoopResult, printNextResult, printOpenPrdChangeActionResult, printOpenPrdChangesResult, printOpenSpecChangeValidationResult, printOpenSpecDiscoveryResult, printOpenSpecGenerateResult, printOpenSpecTaskResult, printPlaygroundResult, printQualityResult, printReviewResult, printRunResult, printStandardsResult, printStatus, printSynthesizeResult, printValidation, printVisualCompareResult } from './cli/print.js';
+import { printAcceptedSpecsResult, printAgentIntegrationResult, printBenchmarkResult, printCaptureResult, printClarifyResult, printClassifyResult, printDevelopmentStandardsResult, printDiagramResult, printDiffResult, printDoctorResult, printFleetResult, printFreezeResult, printGrowthResult, printHandoffResult, printHistoryResult, printInitResult, printInterviewResult, printKnowledgeResult, printLearningResult, printLoopResult, printNextResult, printOpenPrdChangeActionResult, printOpenPrdChangesResult, printOpenSpecChangeValidationResult, printOpenSpecDiscoveryResult, printOpenSpecGenerateResult, printOpenSpecTaskResult, printPlaygroundResult, printQualityResult, printReleaseResult, printReviewResult, printRunResult, printSelfUpdateResult, printStandardsResult, printStatus, printSynthesizeResult, printUpgradeResult, printValidation, printVisualCompareResult } from './cli/print.js';
 import { cjoin, exists, writeJson, writeText, writeYaml } from './fs-utils.js';
 import { diagramWorkspace } from './diagram-workspace.js';
 import { createOpenSpecDiscoveryWorkspace } from './discovery.js';
 import { createFleetWorkspace } from './fleet.js';
+import { selfUpdateWorkspace, upgradeWorkspace } from './self-update.js';
 import { backfillWorkUnitsWorkspace } from './work-unit-migration.js';
 import { generateLearningReviewWorkspace, setLearningReviewModeWorkspace } from './learning-review.js';
-import { addBenchmarkWorkspace, approveBenchmarkWorkspace, benchmarkWorkspace, listBenchmarkWorkspace, verifyBenchmarkWorkspace } from './benchmark.js';
+import { addBenchmarkWorkspace, approveBenchmarkWorkspace, benchmarkWorkspace, listBenchmarkWorkspace, observeBenchmarkSourceWorkspace, verifyBenchmarkWorkspace } from './benchmark.js';
 import { initQualityWorkspace, qualityWorkspace, verifyQualityWorkspace, learnQualityWorkspace } from './quality.js';
+import { archiveKnowledgeCandidate, listKnowledgeCandidates, rejectKnowledgeCandidate, restoreKnowledgeCandidate } from './knowledge.js';
 import { createRunWorkspace } from './run-harness.js';
 import { checkDevelopmentStandardsWorkspace } from './dev-standards.js';
 import { applyGrowthCandidateWorkspace, checkGrowthWorkspace, initGrowthWorkspace, rejectGrowthCandidateWorkspace, reviewGrowthWorkspace } from './growth.js';
 import { buildReviewPresentationTemplatePayload, reviewPresentationWorkspace } from './review-presentation.js';
+import { analyzeWorkspaceRegistryHygiene } from './registry-hygiene.js';
 import { syncSessionBindingFromChange } from './session-binding.js';
+import { readSessionRegistry } from './session-registry.js';
 import { visualCompareWorkspace } from './visual-compare.js';
 import { captureWorkspace, clarifyWorkspace, classifyWorkspace, computeWorkspaceGuidance, diffWorkspace, historyWorkspace, interviewWorkspace, nextWorkspace, playgroundWorkspace, reviewWorkspace, synthesizeWorkspace } from './workspace-workflow.js';
-import { appendDecision, appendProgress, appendVerification, appendWorkflowEvent, buildWorkflowTaskGraph, computeWorkspaceDigest, CORE_TEMPLATE_FILES, ensureWorkspaceSkeleton, isSupportedProductType, loadLatestVersionSnapshot, loadWorkspace, migrateWorkspaceSkeleton, normalizeVersionId, readVersionIndex, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace } from './workspace-core.js';
+import { appendDecision, appendProgress, appendVerification, appendWorkflowEvent, buildCurrentStateSnapshot, buildWorkflowTaskGraph, computeWorkspaceDigest, CORE_TEMPLATE_FILES, ensureWorkspaceSkeleton, isSupportedProductType, loadCurrentLaneSnapshot, loadLatestVersionSnapshot, loadWorkspace, migrateWorkspaceSkeleton, normalizeVersionId, persistWorkspaceCurrentState, readVersionIndex, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace } from './workspace-core.js';
+import { readWorkspaceRegistry } from './workspace-registry.js';
 
 async function initWorkspace(projectRoot, options) {
   const ws = await ensureWorkspaceSkeleton(projectRoot, options);
@@ -40,6 +67,7 @@ async function initWorkspace(projectRoot, options) {
     action: 'init',
     enableUserCodexConfig: Boolean(options.enableUserCodexConfig),
     codexHome: options.codexHome,
+    cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
     hookProfile: options.hookProfile,
   });
@@ -118,6 +146,7 @@ async function setupAgentIntegrationWorkspace(projectRoot, options = {}) {
     action: 'setup',
     enableUserCodexConfig: Boolean(options.enableUserCodexConfig),
     codexHome: options.codexHome,
+    cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
     hookProfile: options.hookProfile,
   });
@@ -134,6 +163,7 @@ async function updateAgentIntegrationWorkspace(projectRoot, options = {}) {
     force: Boolean(options.force),
     enableUserCodexConfig: Boolean(options.enableUserCodexConfig),
     codexHome: options.codexHome,
+    cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
     hookProfile: options.hookProfile,
   });
@@ -145,8 +175,17 @@ async function doctorWorkspace(projectRoot, options = {}) {
     tools: options.tools ?? 'all',
     enableUserCodexConfig: Boolean(options.enableUserCodexConfig),
     codexHome: options.codexHome,
+    cursorHome: options.cursorHome,
     hookProfile: options.hookProfile,
   });
+  const codexRuntime = (agentIntegration.tools ?? []).includes('codex') && options.checkCodexRuntime
+    ? await ensureCodexCliReady({
+      cwd: projectRoot,
+      repair: Boolean(options.fix),
+      runCommand: options.codexRunCommand,
+      packageManager: options.packageManager,
+    })
+    : null;
   const standards = await checkStandardsWorkspace(projectRoot).catch((error) => ({
     ok: false,
     errors: [error instanceof Error ? error.message : String(error)],
@@ -162,20 +201,48 @@ async function doctorWorkspace(projectRoot, options = {}) {
       warnings: [],
       checks: [],
     }));
+  const workspaceRegistry = await readWorkspaceRegistry({ openprdHome: options.openprdHome }).catch(() => null);
+  const sessionRegistry = await readSessionRegistry({ openprdHome: options.openprdHome }).catch(() => null);
+  const registryHygiene = workspaceRegistry
+    ? analyzeWorkspaceRegistryHygiene(workspaceRegistry.entries)
+    : { ok: true, issues: [] };
+  const registryWarnings = [
+    ...(registryHygiene.issues ?? []).map((issue) => `registry: ${issue.message}`),
+    ...((workspaceRegistry?.staleEntries ?? []).map((entry) => `registry: stale workspace ${entry.workspaceRoot} (${entry.reason})`)),
+    ...((sessionRegistry?.staleEntries ?? []).map((entry) => `session-registry: stale session ${entry.sessionId} (${entry.reason})`)),
+  ];
 
   return {
-    ok: agentIntegration.ok && standards.ok && validation.valid,
+    ok: agentIntegration.ok && (codexRuntime?.ok ?? true) && standards.ok && validation.valid,
     action: 'doctor',
     projectRoot,
     tools: agentIntegration.tools,
     agentIntegration,
+    codexRuntime,
     standards,
     validation,
+    registry: {
+      workspace: workspaceRegistry,
+      sessions: sessionRegistry,
+      hygiene: registryHygiene,
+      warnings: registryWarnings,
+    },
     errors: [
       ...agentIntegration.errors,
+      ...(codexRuntime?.errors ?? []).map((error) => `codex-runtime: ${error}`),
       ...(standards.errors ?? []).map((error) => `standards: ${error}`),
       ...(validation.errors ?? []).map((error) => `validate: ${error}`),
     ],
+    warnings: registryWarnings,
+  };
+}
+
+async function readCliPackageInfo() {
+  const raw = await fs.readFile(new URL('../package.json', import.meta.url), 'utf8');
+  const packageJson = JSON.parse(raw);
+  return {
+    name: packageJson.name ?? '@openprd/cli',
+    version: packageJson.version ?? '0.0.0',
   };
 }
 
@@ -226,7 +293,7 @@ async function freezeWorkspace(projectRoot) {
   }
 
   let ws = validation.ws;
-  let latest = await loadLatestVersionSnapshot(ws);
+  let latest = await loadCurrentLaneSnapshot(ws, { fallbackToLatest: true });
   if (!latest) {
     const synthesized = await synthesizeWorkspace(projectRoot, {});
     ws = synthesized.ws;
@@ -284,7 +351,7 @@ async function freezeWorkspace(projectRoot) {
     frozenAt: snapshot.frozenAt,
     digest,
   };
-  await writeJson(ws.paths.currentState, currentState);
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
   await appendWorkflowEvent(ws, 'frozen', {
     versionId: snapshot.latestVersionId,
     digest,
@@ -303,9 +370,9 @@ async function freezeWorkspace(projectRoot) {
     `已 freeze 版本 ${snapshot.latestVersionId}。`,
     `已准备好交接给 ${resolveActiveTemplatePack(ws) === 'base' ? '下游执行方' : '执行系统'}。`,
   ]);
-  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(currentState));
+  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(storedCurrentState));
 
-  return { ok: true, ws, report, snapshot, latest };
+  return { ok: true, ws: { ...ws, data: { ...ws.data, currentState: storedCurrentState } }, report, snapshot, latest };
 }
 
 async function handoffWorkspace(projectRoot, target) {
@@ -315,13 +382,23 @@ async function handoffWorkspace(projectRoot, target) {
   }
 
   const { ws, snapshot } = freeze;
+  const sourceSnapshot = freeze.latest?.snapshot ?? snapshot;
   const exportDir = cjoin(ws.paths.exportsDir, target);
+  const releaseState = await loadReleaseLedger(projectRoot);
+  const releaseSummary = buildReleaseLedgerSummary(releaseState.ledger);
+  const releaseChangeSummary = releaseSummary.enabled && releaseSummary.currentVersion
+    ? buildReleaseChangeSummary(releaseState.ledger, { limit: 5 })
+    : null;
+  const changeSummary = releaseChangeSummary?.items?.length
+    ? releaseChangeSummary
+    : buildSnapshotChangeSummary(sourceSnapshot, { limit: 5 });
   await fs.mkdir(exportDir, { recursive: true });
 
   const handoff = {
     version: 1,
     versionId: snapshot.latestVersionId,
     versionNumber: snapshot.prdVersion,
+    projectVersion: releaseSummary.currentVersion,
     target,
     generatedAt: timestamp(),
     workspaceRoot: ws.workspaceRoot,
@@ -331,6 +408,10 @@ async function handoffWorkspace(projectRoot, target) {
     productTypes: ws.data.config?.supportedProductTypes ?? [],
     productType: resolveCurrentProductType(ws),
     digest: snapshot.digest,
+    projectRelease: releaseSummary,
+    changeSummarySource: releaseChangeSummary?.items?.length ? 'release-ledger' : 'snapshot',
+    changeSummary,
+    releaseNotes: changeSummary.items.map((item) => item.sentence),
     sourceFiles: [
       ...CORE_TEMPLATE_FILES,
       ...((await exists(ws.paths.activeArchitectureDiagramHtml)) ? ['engagements/active/architecture-diagram.html'] : []),
@@ -346,7 +427,12 @@ async function handoffWorkspace(projectRoot, target) {
   };
 
   await writeJson(cjoin(exportDir, 'handoff.json'), handoff);
-  await writeText(cjoin(exportDir, 'handoff.md'), `# 交接\n\n- 目标: ${target}\n- 版本: ${handoff.versionId}\n- Schema: ${handoff.schema}\n- 模板包: ${handoff.templatePack}\n- Digest: ${handoff.digest}\n- 下一步: ${handoff.nextStep}\n`);
+  const summarySection = handoff.changeSummary.markdown
+    ? `\n## 变化摘要\n\n${handoff.changeSummary.markdown}\n`
+    : '';
+  const handoffMarkdown = `# 交接\n\n- 目标: ${target}\n- 版本: ${handoff.versionId}\n${handoff.projectVersion ? `- 项目版本: ${handoff.projectVersion}\n` : ''}- Schema: ${handoff.schema}\n- 模板包: ${handoff.templatePack}\n- Digest: ${handoff.digest}\n- 下一步: ${handoff.nextStep}\n${summarySection}`;
+  await writeText(cjoin(exportDir, 'handoff.md'), handoffMarkdown);
+  await writeText(ws.paths.activeHandoff, handoffMarkdown);
   if (await exists(ws.paths.activeArchitectureDiagramHtml)) {
     await fs.copyFile(ws.paths.activeArchitectureDiagramHtml, cjoin(exportDir, 'architecture-diagram.html'));
   }
@@ -384,10 +470,107 @@ async function handoffWorkspace(projectRoot, target) {
     handedOffAt: handoff.generatedAt,
     handoffTarget: target,
   };
-  await writeJson(ws.paths.currentState, currentState);
-  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(currentState));
+  const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
+  await writeJson(ws.paths.taskGraph, buildWorkflowTaskGraph(storedCurrentState));
 
-  return { ok: true, ws, report: freeze.report, snapshot, handoff, exportDir };
+  return { ok: true, ws: { ...ws, data: { ...ws.data, currentState: storedCurrentState } }, report: freeze.report, snapshot, handoff, exportDir };
+}
+
+async function releaseWorkspace(projectRoot, options = {}) {
+  const workspaceRoot = cjoin(projectRoot, '.openprd');
+  if (!(await exists(workspaceRoot))) {
+    return {
+      ok: false,
+      action: 'release',
+      projectRoot,
+      errors: [`Missing workspace: ${workspaceRoot}. Please run openprd init first.`],
+    };
+  }
+
+  const loaded = await loadReleaseLedger(projectRoot);
+  let ledger = loaded.ledger;
+  const actions = [];
+  const warnings = [];
+  let changed = false;
+
+  try {
+    if (options.disable) {
+      ({ ledger } = setReleaseLedgerEnabled(ledger, false));
+      actions.push('disable');
+      changed = true;
+    }
+
+    if (options.enable) {
+      ({ ledger } = setReleaseLedgerEnabled(ledger, true));
+      actions.push('enable');
+      changed = true;
+    }
+
+    if (options.setVersion) {
+      const updated = setCurrentReleaseVersion(ledger, options.setVersion, {
+        status: options.status === 'released' ? 'current' : (options.status ?? 'current'),
+      });
+      ledger = updated.ledger;
+      actions.push('set-version');
+      changed = true;
+      if (updated.previousVersion) {
+        warnings.push(`当前项目版本已从 ${updated.previousVersion} 切换到 ${updated.entry.version}；旧版本默认改为 released。`);
+      }
+      if (updated.semver.warning) {
+        warnings.push(updated.semver.warning);
+      }
+    }
+
+    if (options.status && !options.setVersion) {
+      const updated = setReleaseVersionStatus(ledger, options.status, { version: options.version });
+      ledger = updated.ledger;
+      actions.push('set-status');
+      changed = true;
+    }
+
+    if (options.notes) {
+      const updated = appendReleaseEntry(ledger, options.notes, {
+        version: options.version,
+        fallbackType: '调整',
+        source: {
+          kind: 'manual-note',
+          manualId: `manual-note-${Date.now()}`,
+        },
+      });
+      ledger = updated.ledger;
+      actions.push('append-note');
+      changed = true;
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      action: 'release',
+      projectRoot,
+      errors: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+
+  if (changed) {
+    await saveReleaseLedger(projectRoot, ledger);
+  }
+
+  const summary = buildReleaseLedgerSummary(ledger, { version: options.version });
+  const changeSummary = buildReleaseChangeSummary(ledger, {
+    version: options.version ?? summary.currentVersion,
+    limit: 5,
+  });
+
+  return {
+    ok: true,
+    action: 'release',
+    projectRoot,
+    releaseLedgerPath: loaded.filePath,
+    changed,
+    actions,
+    warnings,
+    summary,
+    changeSummary,
+  };
 }
 
 function reviewConfirmationCommand(snapshot) {
@@ -421,17 +604,9 @@ function assertPrdReviewConfirmedForChange(currentState, snapshot) {
 async function generateOpenSpecChangeWorkspace(projectRoot, options = {}) {
   const ws = await loadWorkspace(projectRoot);
   const versionIndex = await readVersionIndex(ws);
-  const latest = await loadLatestVersionSnapshot(ws);
+  const latest = await loadCurrentLaneSnapshot(ws, { fallbackToLatest: true });
   const currentState = ws.data.currentState ?? {};
-  const snapshot = latest?.snapshot ?? buildPrdSnapshot(ws, {
-    ...currentState,
-    versionNumber: currentState.prdVersion ?? (versionIndex.at(-1)?.versionNumber ?? 0),
-    versionId: currentState.prdVersion > 0
-      ? formatVersionId(currentState.prdVersion)
-      : (versionIndex.at(-1)?.versionId ?? 'v0000'),
-    productType: resolveCurrentProductType(ws),
-    templatePack: resolveActiveTemplatePack(ws),
-  });
+  const snapshot = latest?.snapshot ?? buildCurrentStateSnapshot(ws, currentState, versionIndex);
   assertPrdReviewConfirmedForChange(currentState, snapshot);
   const analysis = analyzePrdSnapshot(snapshot);
   const result = await writeOpenSpecChangeWorkspace(projectRoot, {
@@ -481,6 +656,12 @@ async function isDirectoryPath(candidate) {
 export async function main(argv = process.argv.slice(2)) {
   const [command = 'help', ...rest] = argv;
 
+  if (command === 'version' || command === '--version' || command === '-v') {
+    const packageInfo = await readCliPackageInfo();
+    console.log(packageInfo.version);
+    return 0;
+  }
+
   if (command === 'help' || command === '--help' || command === '-h') {
     console.log(usage());
     return 0;
@@ -529,8 +710,34 @@ export async function main(argv = process.argv.slice(2)) {
       return result.ok ? 0 : 1;
     }
 
+    if (command === 'self-update') {
+      const result = await selfUpdateWorkspace({
+        dryRun: flags.dryRun,
+        json: flags.json,
+      });
+      printSelfUpdateResult(result, flags.json);
+      return result.ok ? 0 : 1;
+    }
+
+    if (command === 'upgrade') {
+      const result = await upgradeWorkspace(projectPath, {
+        dryRun: flags.dryRun,
+        json: flags.json,
+        fleet: flags.fleet,
+        tools: flags.tools,
+        hookProfile: flags.hookProfile,
+        force: flags.force,
+        maxDepth: flags.maxDepth,
+        include: flags.include,
+        exclude: flags.exclude,
+        report: flags.report,
+      });
+      printUpgradeResult(result, flags.json);
+      return result.ok ? 0 : 1;
+    }
+
     if (command === 'doctor') {
-      const result = await doctorWorkspace(projectPath, { tools: flags.tools, hookProfile: flags.hookProfile, enableUserCodexConfig: true });
+      const result = await doctorWorkspace(projectPath, { tools: flags.tools, hookProfile: flags.hookProfile, fix: flags.fix, checkCodexRuntime: true, enableUserCodexConfig: true });
       printDoctorResult(result, flags.json);
       return result.ok ? 0 : 1;
     }
@@ -585,6 +792,7 @@ export async function main(argv = process.argv.slice(2)) {
         message: flags.message,
         evidence: flags.evidence,
         notes: flags.notes,
+        repairAgent: flags.repairAgent,
       };
       if (flags.init) {
         result = await initLoopWorkspace(projectPath, options);
@@ -629,6 +837,37 @@ export async function main(argv = process.argv.slice(2)) {
         force: flags.force,
       });
       printQualityResult(result, flags.json);
+      return result.ok ? 0 : 1;
+    }
+
+    if (command === 'knowledge') {
+      const subcommand = positionals[0] ?? 'candidates';
+      const firstArgIsProjectPath = !flags.path && positionals.length > 1 && await isDirectoryPath(positionals[1]);
+      const knowledgeProjectPath = path.resolve(flags.path ?? (firstArgIsProjectPath ? positionals[1] : process.cwd()));
+      let result;
+      if (subcommand === 'candidates' || subcommand === 'list') {
+        result = await listKnowledgeCandidates(knowledgeProjectPath, {
+          status: flags.status ?? 'pending-review',
+        });
+      } else if (subcommand === 'reject') {
+        result = await rejectKnowledgeCandidate(knowledgeProjectPath, {
+          id: flags.id ?? positionals[1] ?? null,
+          reason: flags.reason ?? flags.notes,
+        });
+      } else if (subcommand === 'archive') {
+        result = await archiveKnowledgeCandidate(knowledgeProjectPath, {
+          id: flags.id ?? positionals[1] ?? null,
+          reason: flags.reason ?? flags.notes,
+        });
+      } else if (subcommand === 'restore') {
+        result = await restoreKnowledgeCandidate(knowledgeProjectPath, {
+          id: flags.id ?? positionals[1] ?? null,
+        });
+      } else {
+        console.log('Usage: openprd knowledge <candidates|reject|archive|restore> [path-or-id] [--status <pending-review|all|rejected|archived|promoted|merged>] [--id <candidate-id>] [--reason <text>] [--json]');
+        return 1;
+      }
+      printKnowledgeResult(result, flags.json);
       return result.ok ? 0 : 1;
     }
 
@@ -693,6 +932,14 @@ export async function main(argv = process.argv.slice(2)) {
           source: target ?? flags.source,
           notes: flags.notes,
         });
+      } else if (subcommand === 'observe') {
+        result = await observeBenchmarkSourceWorkspace(benchmarkProjectPath, {
+          source: target ?? flags.source,
+          notes: flags.notes,
+          task: flags.item ?? flags.event,
+          adoptedSignal: flags.status ?? flags.outcome,
+          threshold: flags.threshold,
+        });
       } else if (subcommand === 'approve') {
         result = await approveBenchmarkWorkspace(benchmarkProjectPath, {
           id: flags.id ?? target,
@@ -702,7 +949,7 @@ export async function main(argv = process.argv.slice(2)) {
       } else if (subcommand === 'list') {
         result = await listBenchmarkWorkspace(benchmarkProjectPath);
       } else {
-        console.log('Usage: openprd benchmark <add|list|approve|verify> [target-or-id] [path-for-list-or-verify] [--path <project>] [--notes <text>] [--id <benchmark-id>]');
+        console.log('Usage: openprd benchmark <add|observe|list|approve|verify> [target-or-id] [path-for-list-or-verify] [--path <project>] [--notes <text>] [--id <benchmark-id>]');
         return 1;
       }
       printBenchmarkResult(result, flags.json);
@@ -824,11 +1071,19 @@ export async function main(argv = process.argv.slice(2)) {
         console.log(`超限或格式问题: ${result.presentationFeedback.length}`);
         if (result.presentationFeedback.length > 0) {
           for (const item of result.presentationFeedback.slice(0, 6)) {
-            console.log(`- ${item.area} / ${item.target}: ${item.action}`);
+            const pathHint = item.jsonPath ? `${item.jsonPath}: ` : '';
+            const sizeHint = item.maxChars ? ` 当前 ${item.currentChars} 字，限制 ${item.maxChars} 字。` : '';
+            console.log(`- ${item.area} / ${item.target}: ${pathHint}${item.action}${sizeHint}`);
           }
         }
         if (result.written) {
           console.log(`已写入: ${result.written}`);
+        }
+        if (result.reviewPath) {
+          console.log(`已生成评审面板: ${result.reviewPath}`);
+        }
+        if (result.reviewEntryPath) {
+          console.log(`已更新固定入口: ${result.reviewEntryPath}`);
         }
       }
       return flags.failOnViolation && !result.ok ? 1 : 0;
@@ -856,6 +1111,19 @@ export async function main(argv = process.argv.slice(2)) {
       const result = await historyWorkspace(projectPath);
       printHistoryResult(result, flags.json);
       return 0;
+    }
+
+    if (command === 'release') {
+      const result = await releaseWorkspace(projectPath, {
+        enable: flags.enable,
+        disable: flags.disable,
+        setVersion: flags.set,
+        status: flags.status,
+        version: flags.version,
+        notes: flags.notes,
+      });
+      printReleaseResult(result, flags.json);
+      return result.ok ? 0 : 1;
     }
 
     if (command === 'validate') {
@@ -964,7 +1232,9 @@ export async function main(argv = process.argv.slice(2)) {
         evidence: flags.evidence,
         notes: flags.notes,
       };
-      const result = flags.advance
+      const result = flags.evidenceRequired
+        ? await checkOpenSpecTaskEvidenceWorkspace(projectPath, taskOptions)
+        : flags.advance
         ? await advanceOpenSpecTaskWorkspace(projectPath, taskOptions)
         : flags.verify
           ? await verifyOpenSpecTaskWorkspace(projectPath, taskOptions)
@@ -1023,6 +1293,8 @@ export {
   initWorkspace,
   setupAgentIntegrationWorkspace,
   updateAgentIntegrationWorkspace,
+  selfUpdateWorkspace,
+  upgradeWorkspace,
   doctorWorkspace,
   fleetWorkspace,
   backfillWorkUnitsWorkspace,
@@ -1044,6 +1316,7 @@ export {
   nextWorkspace,
   diffWorkspace,
   historyWorkspace,
+  releaseWorkspace,
   reviewWorkspace,
   reviewPresentationWorkspace,
   freezeWorkspace,
@@ -1054,6 +1327,7 @@ export {
   listOpenSpecTaskWorkspace,
   advanceOpenSpecTaskWorkspace,
   verifyOpenSpecTaskWorkspace,
+  checkOpenSpecTaskEvidenceWorkspace,
   listOpenPrdChangesWorkspace,
   activateOpenPrdChangeWorkspace,
   closeOpenPrdChangeWorkspace,
@@ -1071,6 +1345,10 @@ export {
   verifyQualityWorkspace,
   learnQualityWorkspace,
   qualityWorkspace,
+  listKnowledgeCandidates,
+  rejectKnowledgeCandidate,
+  archiveKnowledgeCandidate,
+  restoreKnowledgeCandidate,
   visualCompareWorkspace,
   checkDevelopmentStandardsWorkspace,
   initGrowthWorkspace,
@@ -1080,6 +1358,7 @@ export {
   rejectGrowthCandidateWorkspace,
   benchmarkWorkspace,
   addBenchmarkWorkspace,
+  observeBenchmarkSourceWorkspace,
   listBenchmarkWorkspace,
   approveBenchmarkWorkspace,
   verifyBenchmarkWorkspace,

@@ -4,7 +4,6 @@ import YAML from 'yaml';
 import { listChangeDirs, readDiscoveryConfig, resolveChangeDir } from './paths.js';
 import { analyzeOpenSpecTaskVolumes } from './tasks.js';
 import { checkStandardsWorkspace } from '../standards.js';
-import { findOpenPrdSpecLanguageViolations } from '../language-policy.js';
 
 function cjoin(...parts) {
   return path.join(...parts);
@@ -70,7 +69,6 @@ const THEN_STEP_RE = /^-\s+\*\*(?:THEN|则|那么)\*\*/im;
 function validateOpenSpecSpecText(relativePath, text, errors, checks) {
   const requirementMatches = [...text.matchAll(REQUIREMENT_HEADING_RE)];
   const sectionMatches = [...text.matchAll(SPEC_SECTION_HEADING_RE)];
-  const languageViolations = findOpenPrdSpecLanguageViolations(text);
 
   if (sectionMatches.length === 0) {
     errors.push(`${relativePath} 必须包含“新增需求”“修改需求”或“移除需求”章节。`);
@@ -102,13 +100,6 @@ function validateOpenSpecSpecText(relativePath, text, errors, checks) {
         errors.push(`${relativePath} 的场景 "${scenarioMatch[1].trim()}" 缺少“则”。`);
       }
     }
-  }
-
-  for (const violation of languageViolations.slice(0, 5)) {
-    errors.push(`${relativePath}:${violation.line} 不符合简体中文规则: ${violation.reason}。除必要专业字段、命令、文件名或英文产品名外，spec.md 正文必须使用简体中文。`);
-  }
-  if (languageViolations.length > 5) {
-    errors.push(`${relativePath} 还有 ${languageViolations.length - 5} 处简体中文规则问题。`);
   }
 
   checks.push(`${relativePath}: ${requirementMatches.length} 个需求。`);

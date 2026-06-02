@@ -2,11 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { buildSnapshotChangeSummary } from './change-summary.js';
 import { buildDiagramArtifact, renderDiagramMermaidFromModel } from './diagram-core.js';
-import { analyzePrdSnapshot, buildPrdSnapshot, getRequiredFieldDescriptors, renderPrdMarkdown, summarizeSnapshot } from './prd-core.js';
+import { analyzePrdSnapshot, buildPrdSnapshot, formatVersionId, getRequiredFieldDescriptors, renderPrdMarkdown, summarizeSnapshot } from './prd-core.js';
+import { normalizeReleaseLedger } from './release-ledger.js';
 import { appendJsonl, appendText, cjoin, exists, readJson, readText, readYaml, stringifyYaml, writeJson, writeText, writeYaml } from './fs-utils.js';
 import { OPENSPEC_TASK_MAX_ITEMS_PER_FILE } from './openspec/constants.js';
-import { checkStandardsWorkspace } from './standards.js';
+import { checkStandardsWorkspace, STANDARD_DOCS } from './standards.js';
 import { timestamp } from './time.js';
 
 const PACKAGE_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -84,11 +86,19 @@ const WORKSPACE_SEED_REFRESH_FILES = [
 ];
 const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'artifacts',
+  'benchmarks',
   'discovery',
+  'growth',
   'harness',
+  'engagements/active/prd.md',
+  'engagements/active/flows.md',
+  'engagements/active/roles.md',
+  'engagements/active/handoff.md',
+  'engagements/work-units',
   'knowledge',
   'learning',
   'quality',
+  'reviews',
   'state',
   'sessions',
   'exports',
@@ -105,6 +115,46 @@ const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'engagements/active/verification.md',
 ]);
 
+const DEFAULT_ACTIVE_PRD = `# PRD
+
+## 类型专项模块
+
+- 类型: 待确认
+- humanAgentContract: 待补充
+- autonomyBoundary: 待补充
+- toolBoundary: 待补充
+- stateModel: 待补充
+- evalPlan: 待补充
+`;
+
+const DEFAULT_ACTIVE_FLOWS = `# 流程
+
+## 主流程
+
+- 待补充
+`;
+
+const DEFAULT_ACTIVE_ROLES = `# 角色
+
+## 用户
+
+- 主要用户:
+- 待补充
+
+- 次要用户:
+- 待补充
+
+- 相关方:
+- 待补充
+`;
+
+const DEFAULT_ACTIVE_HANDOFF = `# 交接
+
+- 负责人: 待补充
+- 下一步: 待补充
+- 目标系统: OpenPrd
+`;
+
 const DEFAULT_DISCOVERY_CONFIG = {
   activeChange: null,
   taskSharding: {
@@ -116,10 +166,183 @@ const DEFAULT_DISCOVERY_CONFIG = {
   taskMetadata: {
     stableIdPattern: 'T###.##',
     required: ['done', 'verify'],
-    optional: ['deps', 'type'],
+    optional: [
+      'deps',
+      'type',
+      'test-layer',
+      'test-size',
+      'test-scope',
+      'evidence',
+      'evidence-plan',
+      'upgrade-reason',
+      'waiver',
+      'waiver-reason',
+      'execution-mode',
+      'parallel-group',
+      'write-scope',
+      'owner-role',
+      'local-verify',
+      'integration-owner',
+    ],
     dependencyOrder: 'dependencies must appear before dependents',
   },
 };
+
+const WORKSPACE_SCENARIO_IGNORED_ENTRIES = new Set(['.openprd', '.DS_Store', '.git', '.omx']);
+const WORKSPACE_SCENARIO_BOOTSTRAP_FILE_MARKERS = new Map([
+  ['AGENTS.md', 'OPENPRD:AGENTS:START'],
+  ['CLAUDE.md', 'OPENPRD:CLAUDE:START'],
+]);
+const OPENPRD_INSTALL_MANIFEST_PATH = path.join('.openprd', 'harness', 'install-manifest.json');
+const OPENPRD_HARNESS_DIR = cjoin('.openprd', 'harness');
+const OPENPRD_HARNESS_REQUIREMENT_GATE = cjoin(OPENPRD_HARNESS_DIR, 'requirement-gate.json');
+const OPENPRD_HARNESS_REQUIREMENT_GATES_DIR = cjoin(OPENPRD_HARNESS_DIR, 'requirement-gates');
+const OPENPRD_HARNESS_SESSION_BINDINGS_DIR = cjoin(OPENPRD_HARNESS_DIR, 'session-bindings');
+const OPENPRD_HARNESS_SESSION_STATES_DIR = cjoin(OPENPRD_HARNESS_DIR, 'session-states');
+
+function normalizeLaneSessionId(sessionId) {
+  const text = String(sessionId ?? '').trim();
+  return text || null;
+}
+
+function sessionLaneFileName(sessionId) {
+  const normalized = normalizeLaneSessionId(sessionId);
+  if (!normalized) {
+    return null;
+  }
+  return `${normalized.replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
+}
+
+function sessionCurrentStatePath(projectRoot, sessionId) {
+  const fileName = sessionLaneFileName(sessionId);
+  if (!fileName) {
+    return null;
+  }
+  return cjoin(projectRoot, OPENPRD_HARNESS_SESSION_STATES_DIR, fileName);
+}
+
+function sessionRequirementGatePath(projectRoot, sessionId) {
+  const fileName = sessionLaneFileName(sessionId);
+  if (!fileName) {
+    return null;
+  }
+  return cjoin(projectRoot, OPENPRD_HARNESS_REQUIREMENT_GATES_DIR, fileName);
+}
+
+function sessionBindingPath(projectRoot, sessionId) {
+  const fileName = sessionLaneFileName(sessionId);
+  if (!fileName) {
+    return null;
+  }
+  return cjoin(projectRoot, OPENPRD_HARNESS_SESSION_BINDINGS_DIR, fileName);
+}
+
+async function readActiveRequirementLane(projectRoot, workspaceCurrentState = null, options = {}) {
+  const legacyGate = options.legacyGate ?? await readJson(cjoin(projectRoot, OPENPRD_HARNESS_REQUIREMENT_GATE)).catch(() => null);
+  const explicitSessionId = normalizeLaneSessionId(options.sessionId);
+  const activeSessionId = explicitSessionId
+    ?? normalizeLaneSessionId(legacyGate?.active ? legacyGate.sessionId : null)
+    ?? normalizeLaneSessionId(workspaceCurrentState?.laneSessionId);
+  if (!activeSessionId) {
+    return {
+      sessionId: null,
+      scope: 'workspace',
+      gate: legacyGate?.active ? legacyGate : null,
+      binding: null,
+      sessionState: null,
+      currentStatePath: null,
+    };
+  }
+  const [scopedGate, binding, sessionState] = await Promise.all([
+    readJson(sessionRequirementGatePath(projectRoot, activeSessionId)).catch(() => null),
+    readJson(sessionBindingPath(projectRoot, activeSessionId)).catch(() => null),
+    readJson(sessionCurrentStatePath(projectRoot, activeSessionId)).catch(() => null),
+  ]);
+  return {
+    sessionId: activeSessionId,
+    scope: 'session',
+    gate: scopedGate ?? (legacyGate?.active ? legacyGate : null),
+    binding,
+    sessionState,
+    currentStatePath: sessionCurrentStatePath(projectRoot, activeSessionId),
+  };
+}
+
+function materializePersistedCurrentState(currentState, sessionId = null) {
+  const normalized = normalizeLaneSessionId(sessionId);
+  return {
+    ...(currentState ?? {}),
+    laneScope: normalized ? 'session' : 'workspace',
+    laneSessionId: normalized,
+  };
+}
+
+async function persistWorkspaceCurrentState(ws, currentState, options = {}) {
+  const sessionId = normalizeLaneSessionId(options.sessionId ?? ws.data.currentSessionId);
+  const stored = materializePersistedCurrentState(currentState, sessionId);
+  if (sessionId) {
+    const scopedPath = ws.paths.sessionCurrentState ?? sessionCurrentStatePath(ws.projectRoot, sessionId);
+    await writeJson(scopedPath, stored);
+  }
+  if (!sessionId || options.writeWorkspaceMirror !== false) {
+    await writeJson(ws.paths.workspaceCurrentState ?? ws.paths.currentState, stored);
+  }
+  return stored;
+}
+
+function buildCurrentStateSnapshot(ws, currentState, versionIndex = []) {
+  const state = currentState ?? {};
+  return buildPrdSnapshot(ws, {
+    ...state,
+    versionNumber: state.prdVersion ?? (versionIndex.at(-1)?.versionNumber ?? 0),
+    versionId: state.prdVersion > 0
+      ? formatVersionId(state.prdVersion)
+      : (versionIndex.at(-1)?.versionId ?? 'v0000'),
+    productType: state.productType ?? resolveCurrentProductType(ws),
+    templatePack: state.templatePack ?? resolveActiveTemplatePack(ws),
+    status: state.status ?? 'draft',
+  });
+}
+
+async function loadCurrentLaneSnapshot(ws, options = {}) {
+  const versionIndex = await readVersionIndex(ws);
+  const currentState = ws.data.currentState ?? {};
+  const fallbackToLatest = options.fallbackToLatest !== false;
+  const candidateVersionIds = [
+    currentState.reviewStatus?.versionId,
+    currentState.latestVersionId,
+    currentState.versionId,
+    ws.data.sessionBinding?.versionId,
+  ].map((value) => normalizeVersionId(value)).filter(Boolean);
+  for (const versionId of candidateVersionIds) {
+    const snapshot = await readVersionSnapshot(ws, versionId);
+    if (snapshot) {
+      return {
+        snapshot,
+        indexEntry: versionIndex.find((entry) => normalizeVersionId(entry.versionId) === versionId) ?? null,
+        source: ws.data.currentSessionId ? 'session-version' : 'workspace-version',
+      };
+    }
+  }
+  if (Object.keys(currentState).length > 0) {
+    return {
+      snapshot: buildCurrentStateSnapshot(ws, currentState, versionIndex),
+      indexEntry: null,
+      source: ws.data.currentSessionId ? 'session-draft' : 'workspace-draft',
+    };
+  }
+  if (!fallbackToLatest) {
+    return null;
+  }
+  const latest = await loadLatestVersionSnapshot(ws);
+  if (latest) {
+    return {
+      ...latest,
+      source: ws.data.currentSessionId ? 'workspace-latest-fallback' : 'workspace-latest',
+    };
+  }
+  return null;
+}
 
 function formatMarkdownLines(lines) {
   return lines.filter(Boolean).map((line) => `- ${line}`).join('\n');
@@ -519,6 +742,10 @@ async function ensureWorkspaceSkeleton(projectRoot, options = {}) {
   await fs.mkdir(cjoin(workspaceRoot, 'engagements', 'active'), { recursive: true });
 
   const defaults = [
+    [cjoin(workspaceRoot, 'engagements', 'active', 'prd.md'), DEFAULT_ACTIVE_PRD],
+    [cjoin(workspaceRoot, 'engagements', 'active', 'flows.md'), DEFAULT_ACTIVE_FLOWS],
+    [cjoin(workspaceRoot, 'engagements', 'active', 'roles.md'), DEFAULT_ACTIVE_ROLES],
+    [cjoin(workspaceRoot, 'engagements', 'active', 'handoff.md'), DEFAULT_ACTIVE_HANDOFF],
     [cjoin(workspaceRoot, 'engagements', 'active', 'decision-log.md'), '# 决策记录\n\n- 已初始化 OpenPrd 决策跟踪。\n'],
     [cjoin(workspaceRoot, 'engagements', 'active', 'open-questions.md'), '# 开放问题\n\n- 已初始化 OpenPrd 问题跟踪。\n'],
     [cjoin(workspaceRoot, 'engagements', 'active', 'progress.md'), '# 进度\n\n- 已初始化 OpenPrd 进度跟踪。\n'],
@@ -676,6 +903,11 @@ async function migrateStandardsConfig(projectRoot, changes) {
     growth: {
       ...(seed.growth ?? {}),
       ...(current.growth ?? {}),
+      autoApply: {
+        ...(seed.growth?.autoApply ?? {}),
+        ...(current.growth?.autoApply ?? {}),
+        safeTypes: mergeStringLists(seed.growth?.autoApply?.safeTypes, current.growth?.autoApply?.safeTypes),
+      },
       scopes: mergeStringLists(seed.growth?.scopes, current.growth?.scopes),
       supportedCandidateTypes: mergeStringLists(seed.growth?.supportedCandidateTypes, current.growth?.supportedCandidateTypes),
     },
@@ -770,10 +1002,12 @@ async function migrateWorkspaceSkeleton(projectRoot, options = {}) {
   }
 
   const seedIntake = await readText(cjoin(SEED_WORKSPACE, 'engagements', 'active', 'intake.md'));
-  const seedPrd = await readText(cjoin(SEED_WORKSPACE, 'engagements', 'active', 'prd.md'));
-  const typeSpecificBlock = extractMarkdownSection(seedPrd, '## 类型专项模块') || seedPrd;
+  const typeSpecificBlock = extractMarkdownSection(DEFAULT_ACTIVE_PRD, '## 类型专项模块') || DEFAULT_ACTIVE_PRD;
   await ensureActiveFileContains(projectRoot, 'engagements/active/intake.md', '我们要解决什么问题？', seedIntake, changes);
   await ensureActiveFileContains(projectRoot, 'engagements/active/prd.md', '类型专项模块', typeSpecificBlock, changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/flows.md', '# 流程', DEFAULT_ACTIVE_FLOWS, changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/roles.md', '# 角色', DEFAULT_ACTIVE_ROLES, changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/handoff.md', '# 交接', DEFAULT_ACTIVE_HANDOFF, changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/decision-log.md', '# 决策记录', '# 决策记录\n\n- 已初始化 OpenPrd 决策跟踪。\n', changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/open-questions.md', '# 开放问题', '# 开放问题\n\n- 已初始化 OpenPrd 问题跟踪。\n', changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/progress.md', '# 进度', '# 进度\n\n- 已初始化 OpenPrd 进度跟踪。\n', changes);
@@ -828,7 +1062,7 @@ async function migrateWorkspaceSkeleton(projectRoot, options = {}) {
   };
 }
 
-async function loadWorkspace(projectRoot) {
+async function loadWorkspace(projectRoot, options = {}) {
   const workspaceRoot = cjoin(projectRoot, '.openprd');
   const paths = {
     workspaceRoot,
@@ -890,7 +1124,13 @@ async function loadWorkspace(projectRoot) {
     stateDir: cjoin(workspaceRoot, 'state'),
     versionsDir: cjoin(workspaceRoot, 'state', 'versions'),
     versionIndex: cjoin(workspaceRoot, 'state', 'version-index.json'),
+    releaseLedger: cjoin(workspaceRoot, 'state', 'release-ledger.json'),
     currentState: cjoin(workspaceRoot, 'state', 'current.json'),
+    workspaceCurrentState: cjoin(workspaceRoot, 'state', 'current.json'),
+    sessionStatesDir: cjoin(workspaceRoot, 'harness', 'session-states'),
+    sessionBindingsDir: cjoin(workspaceRoot, 'harness', 'session-bindings'),
+    requirementGate: cjoin(workspaceRoot, 'harness', 'requirement-gate.json'),
+    requirementGatesDir: cjoin(workspaceRoot, 'harness', 'requirement-gates'),
     freezeState: cjoin(workspaceRoot, 'state', 'freeze.json'),
     taskGraph: cjoin(workspaceRoot, 'state', 'task-graph.json'),
     eventsLog: cjoin(workspaceRoot, 'state', 'events.jsonl'),
@@ -903,15 +1143,27 @@ async function loadWorkspace(projectRoot) {
     openspecHandoffMd: cjoin(workspaceRoot, 'exports', 'openspec', 'handoff.md'),
   };
 
+  const workspaceCurrentState = await readJson(paths.workspaceCurrentState).catch(() => null);
+  const lane = await readActiveRequirementLane(projectRoot, workspaceCurrentState, { sessionId: options.sessionId });
+  if (lane.currentStatePath) {
+    paths.sessionCurrentState = lane.currentStatePath;
+  }
+
   const data = {
     config: await readYaml(paths.config).catch(() => null),
     schema: await readYaml(paths.schema).catch(() => null),
     diagramArchitectureSchema: await readYaml(paths.diagramArchitectureSchema).catch(() => null),
     diagramProductFlowSchema: await readYaml(paths.diagramProductFlowSchema).catch(() => null),
     manifest: await readYaml(paths.manifest).catch(() => null),
-    currentState: await readJson(paths.currentState).catch(() => null),
+    currentState: lane.sessionId ? (lane.sessionState ?? {}) : workspaceCurrentState,
+    workspaceCurrentState,
+    currentSessionId: lane.sessionId,
+    currentStateScope: lane.scope,
+    sessionBinding: lane.binding,
+    activeRequirementGate: lane.gate,
     freezeState: await readJson(paths.freezeState).catch(() => null),
     versionIndex: await readJson(paths.versionIndex).catch(() => []),
+    releaseLedger: normalizeReleaseLedger(await readJson(paths.releaseLedger).catch(() => null)),
     learningIndex: await readJson(paths.learningIndex).catch(() => null),
     learningCurrent: await readJson(paths.learningCurrent).catch(() => null),
   };
@@ -1304,6 +1556,18 @@ async function validateWorkspace(projectRoot) {
     }
   }
 
+  const releaseLedger = ws.data.releaseLedger ?? normalizeReleaseLedger(null);
+  const currentRelease = releaseLedger.currentVersion
+    ? releaseLedger.versions.find((entry) => entry.version === releaseLedger.currentVersion) ?? null
+    : null;
+  if (releaseLedger.enabled && !releaseLedger.currentVersion) {
+    report.warnings.push('state/release-ledger.json 已启用，但还没有设置当前项目版本号');
+  }
+  if (releaseLedger.currentVersion && !currentRelease) {
+    report.valid = false;
+    report.errors.push(`state/release-ledger.json 当前版本 ${releaseLedger.currentVersion} 缺少对应条目`);
+  }
+
   report.checks.push({ name: 'workspace', ok: true });
   report.checks.push({ name: 'schema', ok: true });
   report.checks.push({ name: 'manifest', ok: true });
@@ -1428,6 +1692,114 @@ function coerceCapturedValue(pathString, rawValue, append = false) {
   return text;
 }
 
+function normalizeScenarioRelativePath(relativePath) {
+  return String(relativePath ?? '').replaceAll('\\', '/');
+}
+
+async function readScenarioManagedPaths(projectRoot) {
+  const manifestPath = path.join(projectRoot, OPENPRD_INSTALL_MANIFEST_PATH);
+  const manifest = await readJson(manifestPath).catch(() => null);
+  const managedPaths = new Set();
+  for (const entry of manifest?.managedFiles ?? []) {
+    if (typeof entry?.path !== 'string') {
+      continue;
+    }
+    const normalized = normalizeScenarioRelativePath(entry.path.trim());
+    if (normalized) {
+      managedPaths.add(normalized);
+    }
+  }
+  return managedPaths;
+}
+
+async function listScenarioDirectoryFiles(projectRoot, relativeDir) {
+  const normalizedDir = normalizeScenarioRelativePath(relativeDir);
+  const absoluteDir = path.join(projectRoot, normalizedDir);
+  const entries = await fs.readdir(absoluteDir, { withFileTypes: true }).catch(() => []);
+  const files = [];
+  for (const entry of entries) {
+    if (entry.name === '.DS_Store') {
+      continue;
+    }
+    const childRelative = normalizeScenarioRelativePath(path.posix.join(normalizedDir, entry.name));
+    if (entry.isDirectory()) {
+      files.push(...await listScenarioDirectoryFiles(projectRoot, childRelative));
+      continue;
+    }
+    files.push(childRelative);
+  }
+  return files;
+}
+
+async function directoryContainsOnlyManagedBootstrap(projectRoot, relativeDir, managedPaths) {
+  const files = await listScenarioDirectoryFiles(projectRoot, relativeDir);
+  return files.length > 0 && files.every((file) => managedPaths.has(file));
+}
+
+async function docsDirectoryIsOpenPrdBootstrap(projectRoot) {
+  const docsRoot = path.join(projectRoot, 'docs');
+  const docsEntries = await fs.readdir(docsRoot, { withFileTypes: true }).catch(() => null);
+  if (!docsEntries) {
+    return false;
+  }
+
+  const visibleDocsEntries = docsEntries.filter((entry) => entry.name !== '.DS_Store');
+  if (visibleDocsEntries.length !== 1 || visibleDocsEntries[0].name !== 'basic' || !visibleDocsEntries[0].isDirectory()) {
+    return false;
+  }
+
+  const basicRoot = path.join(docsRoot, 'basic');
+  const basicEntries = await fs.readdir(basicRoot, { withFileTypes: true }).catch(() => null);
+  if (!basicEntries) {
+    return false;
+  }
+
+  const visibleBasicEntries = basicEntries.filter((entry) => entry.name !== '.DS_Store');
+  if (visibleBasicEntries.length !== STANDARD_DOCS.length || visibleBasicEntries.some((entry) => !entry.isFile())) {
+    return false;
+  }
+
+  const expectedDocs = new Map(STANDARD_DOCS.map((doc) => [doc.fileName, doc.body.trim()]));
+  for (const entry of visibleBasicEntries) {
+    const expectedBody = expectedDocs.get(entry.name);
+    if (!expectedBody) {
+      return false;
+    }
+    const actualBody = await readText(path.join(basicRoot, entry.name)).catch(() => null);
+    if (actualBody?.trim() !== expectedBody) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function shouldIgnoreWorkspaceScenarioEntry(projectRoot, entry, managedPaths) {
+  if (WORKSPACE_SCENARIO_IGNORED_ENTRIES.has(entry.name)) {
+    return true;
+  }
+
+  if (entry.isFile() && WORKSPACE_SCENARIO_BOOTSTRAP_FILE_MARKERS.has(entry.name)) {
+    const marker = WORKSPACE_SCENARIO_BOOTSTRAP_FILE_MARKERS.get(entry.name);
+    const content = await readText(path.join(projectRoot, entry.name)).catch(() => null);
+    return Boolean(content?.includes(marker));
+  }
+
+  if (!entry.isDirectory()) {
+    return false;
+  }
+
+  if (entry.name === 'docs') {
+    return docsDirectoryIsOpenPrdBootstrap(projectRoot);
+  }
+
+  if (['.codex', '.claude', '.cursor'].includes(entry.name)) {
+    return directoryContainsOnlyManagedBootstrap(projectRoot, entry.name, managedPaths);
+  }
+
+  return false;
+}
+
 async function detectWorkspaceScenario(projectRoot, ws, versionIndex = []) {
   const currentStatus = ws.data.currentState?.status ?? 'unknown';
   if (versionIndex.length > 0 || ['synthesized', 'frozen', 'handed_off'].includes(currentStatus)) {
@@ -1440,13 +1812,14 @@ async function detectWorkspaceScenario(projectRoot, ws, versionIndex = []) {
   }
 
   const entries = await fs.readdir(projectRoot, { withFileTypes: true }).catch(() => []);
-  const meaningfulEntries = entries.filter((entry) => {
-    if (entry.name === '.openprd') return false;
-    if (entry.name === '.DS_Store') return false;
-    if (entry.name === '.git') return false;
-    if (entry.name === '.omx') return false;
-    return true;
-  });
+  const managedPaths = await readScenarioManagedPaths(projectRoot);
+  const meaningfulEntries = [];
+  for (const entry of entries) {
+    if (await shouldIgnoreWorkspaceScenarioEntry(projectRoot, entry, managedPaths)) {
+      continue;
+    }
+    meaningfulEntries.push(entry);
+  }
 
   if (meaningfulEntries.length === 0) {
     return {
@@ -1507,13 +1880,13 @@ function buildClarificationState({ snapshot, analysis, basePlan, scenario, captu
       {
         id: 'existing-project-goal',
         label: '已有项目范围',
-        prompt: '基于当前已有项目，这个 OpenPrd 工作区现在具体要定义或改进什么？',
+        prompt: '基于当前已有项目，这一轮具体是为谁优化什么，第一版准备先落哪一块？',
         reason: 'kickoff',
       },
       {
         id: 'reuse-boundary',
         label: '复用边界',
-        prompt: '哪些既有能力应视为固定输入，哪些区域仍可调整？',
+        prompt: '哪些既有数据、流程或体验不能被破坏，哪些区域仍可调整？',
         reason: 'kickoff',
       },
       ...missingQuestions,
@@ -1556,9 +1929,9 @@ function buildClarificationPlan(snapshot, analysis) {
   const mustAsk = analysis.missingFields.filter((field) => USER_CLARIFICATION_PATHS.has(field.path));
   const derived = analysis.missingFields.filter((field) => !USER_CLARIFICATION_PATHS.has(field.path));
   const kickoffQuestions = [
-    { id: 'project-overview', label: 'Project overview', prompt: 'What are we building at a high level, and for whom?' },
-    { id: 'success-definition', label: 'Success definition', prompt: 'What outcome would make this first version successful?' },
-    { id: 'first-milestone', label: '首个里程碑', prompt: '我们希望 freeze 的第一个里程碑是什么？' },
+    { id: 'project-overview', label: '项目轮廓', prompt: '这件事整体更像什么产品或能力，它主要是给谁用的？' },
+    { id: 'first-slice', label: '首版切片', prompt: '如果先做第一版，最小可用切片应该先覆盖什么？' },
+    { id: 'guardrails', label: '保护项', prompt: '这轮有哪些明确不做的内容，或者哪些既有能力不能被破坏？' },
   ];
   return {
     totalRequiredFields: analysis.totalRequiredFields,
@@ -1670,7 +2043,11 @@ function renderRolesDoc(snapshot) {
 
 function renderHandoffDoc(snapshot) {
   const { handoff } = snapshot.sections;
-  return `# 交接\n\n- 版本: ${snapshot.versionId}\n- 产品类型: ${snapshot.productType ?? '未分类'}\n- 模板包: ${snapshot.templatePack}\n- Digest: ${snapshot.digest}\n- 负责人: ${handoff.owner}\n- 下一步: ${handoff.nextStep}\n- 目标系统: ${handoff.targetSystem}\n`;
+  const changeSummary = buildSnapshotChangeSummary(snapshot, { limit: 4 });
+  const summarySection = changeSummary.markdown
+    ? `\n## 变化摘要\n\n${changeSummary.markdown}\n`
+    : '';
+  return `# 交接\n\n- 版本: ${snapshot.versionId}\n- 产品类型: ${snapshot.productType ?? '未分类'}\n- 模板包: ${snapshot.templatePack}\n- Digest: ${snapshot.digest}\n- 负责人: ${handoff.owner}\n- 下一步: ${handoff.nextStep}\n- 目标系统: ${handoff.targetSystem}\n${summarySection}`;
 }
 
 
@@ -1679,6 +2056,7 @@ export {
   appendOpenQuestions,
   appendProgress,
   appendVerification,
+  buildCurrentStateSnapshot,
   appendWorkflowEvent,
   buildClarificationPlan,
   buildClarificationState,
@@ -1693,11 +2071,15 @@ export {
   extractMarkdownSection,
   FIELD_PATH_TO_STATE_KEY,
   isSupportedProductType,
+  loadCurrentLaneSnapshot,
   loadLatestVersionSnapshot,
   loadWorkspace,
   migrateWorkspaceSkeleton,
+  normalizeLaneSessionId,
   normalizeVersionId,
+  persistWorkspaceCurrentState,
   readVersionIndex,
+  readActiveRequirementLane,
   readVersionSnapshot,
   renderFlowDoc,
   renderHandoffDoc,

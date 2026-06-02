@@ -6,6 +6,29 @@ import {
   OPENSPEC_TASK_MAX_ITEMS_PER_FILE,
 } from './constants.js';
 import { cjoin, exists, listChangeDirs, readDiscoveryConfig, resolveChangeDir } from './paths.js';
+import {
+  TEST_STRATEGY_METADATA_KEYS,
+  summarizeTaskTestStrategies,
+  validateTaskTestStrategy,
+} from '../test-strategy.js';
+import {
+  EXECUTION_STRATEGY_METADATA_KEYS,
+  summarizeTaskExecutionStrategies,
+  validateTaskExecutionStrategy,
+} from '../execution-strategy.js';
+
+const OPENSPEC_TASK_METADATA_KEYS = [
+  'deps',
+  'done',
+  'verify',
+  'type',
+  'category',
+  'kind',
+  'oracle',
+  ...TEST_STRATEGY_METADATA_KEYS,
+  ...EXECUTION_STRATEGY_METADATA_KEYS,
+];
+const OPENSPEC_TASK_METADATA_PATTERN = new RegExp(`^\\s{2,}-\\s+(${OPENSPEC_TASK_METADATA_KEYS.join('|')}):\\s*(.*)$`, 'i');
 
 async function readText(filePath) {
   return fs.readFile(filePath, 'utf8');
@@ -58,7 +81,7 @@ export function parseOpenSpecTaskFile(text) {
       return;
     }
 
-    const metadataMatch = line.match(/^\s{2,}-\s+(deps|done|verify|type|category|kind|oracle):\s*(.*)$/i);
+    const metadataMatch = line.match(OPENSPEC_TASK_METADATA_PATTERN);
     if (currentTask && metadataMatch) {
       currentTask.metadata[metadataMatch[1].toLowerCase()] = metadataMatch[2].trim();
     }
@@ -272,6 +295,12 @@ export function validateOpenSpecStructuredTasks(sortedFiles, errors, checks) {
     if (normalizedType !== 'governance' && isSpecOnlyValidateCommand(task.metadata.verify)) {
       errors.push(`${formatOpenSpecTaskLocation(task)} 的 verify 只做了 change 结构校验；${normalizedType} 任务必须提供能证明实际落地的验证命令或审查步骤。`);
     }
+    for (const strategyError of validateTaskTestStrategy(task)) {
+      errors.push(`${formatOpenSpecTaskLocation(task)} ${strategyError}`);
+    }
+    for (const strategyError of validateTaskExecutionStrategy(task)) {
+      errors.push(`${formatOpenSpecTaskLocation(task)} ${strategyError}`);
+    }
 
     for (const depId of parseOpenSpecTaskDeps(task.metadata.deps)) {
       if (!OPENSPEC_TASK_ID_PATTERN.test(depId)) {
@@ -290,7 +319,9 @@ export function validateOpenSpecStructuredTasks(sortedFiles, errors, checks) {
     }
   }
 
-  checks.push(`结构化 OpenPrd 任务: ${tasks.length} 个任务，${dependencyCount} 条依赖。`);
+  const strategySummary = summarizeTaskTestStrategies(tasks);
+  const executionSummary = summarizeTaskExecutionStrategies(tasks);
+  checks.push(`结构化 OpenPrd 任务: ${tasks.length} 个任务，${dependencyCount} 条依赖；测试策略显式 ${strategySummary.explicit} 个、推导 ${strategySummary.inferred} 个；执行策略显式 ${executionSummary.explicit} 个、推导 ${executionSummary.inferred} 个。`);
 }
 
 export async function analyzeOpenSpecTaskVolumes(projectRoot, options = {}) {

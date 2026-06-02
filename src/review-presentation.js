@@ -1,9 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { USER_CHANGE_SUMMARY_GUIDE } from './change-summary.js';
+import { buildReleaseLedgerSummary, loadReleaseLedger } from './release-ledger.js';
 
-import { buildReviewPresentationFeedback } from './html-artifacts.js';
+import {
+  buildReviewPresentationFeedback,
+  canonicalReviewPath,
+  defaultReviewArtifactPath,
+  renderReviewArtifact,
+  renderReviewEntryHtml,
+  writeHtmlArtifact,
+} from './html-artifacts.js';
 
 export const REVIEW_PRESENTATION_TEMPLATE = {
+  diagram: {
+    type: 'map',
+    note: '默认用关系图；只有确认为线性流程时改为 flow，并用 flowEdges 明确哪些节点有箭头。',
+  },
   mapNodes: {
     problem: { title: '问题定义', text: '30字内说明问题' },
     goal: { title: '目标', text: '30字内说明目标' },
@@ -12,15 +26,33 @@ export const REVIEW_PRESENTATION_TEMPLATE = {
     risk: { title: '风险', text: '30字内说明风险' },
   },
   flowNodes: [
-    { text: '30字内说明第1步' },
-    { text: '30字内说明第2步' },
-    { text: '30字内说明第3步' },
+    { id: 'step1', text: '30字内说明第1步' },
+    { id: 'step2', text: '30字内说明第2步' },
+    { id: 'step3', text: '30字内说明第3步' },
   ],
+  flowEdges: [
+    { from: 'step1', to: 'step2' },
+    { from: 'step2', to: 'step3' },
+  ],
+  panels: {
+    flow: [
+      USER_CHANGE_SUMMARY_GUIDE.panelExamples.flow,
+    ],
+    function: [
+      USER_CHANGE_SUMMARY_GUIDE.panelExamples.function,
+    ],
+    guardrail: [
+      USER_CHANGE_SUMMARY_GUIDE.panelExamples.guardrail,
+    ],
+    risk: [
+      USER_CHANGE_SUMMARY_GUIDE.panelExamples.risk,
+    ],
+  },
 };
 
 export function buildReviewPresentationTemplatePayload() {
   return {
-    intent: 'Agent 先按这个模板写 reviewPresentation，再用本脚本校验；不要让 HTML 截断文案。',
+    intent: 'Agent 先按这个模板写 reviewPresentation，再用本脚本校验；短标签优先使用新增、修复、优化、调整、移除这类用户可感知变化。',
     presentationTemplate: REVIEW_PRESENTATION_TEMPLATE,
     presentationContract: buildReviewPresentationFeedback({ sections: {} }).contract,
   };
@@ -35,6 +67,7 @@ export async function reviewPresentationWorkspace(projectRoot, options = {}) {
   if (options.presentationPath) {
     const presentationPath = path.resolve(options.presentationPath);
     snapshot.reviewPresentation = normalizeReviewPresentationInput(await readJson(presentationPath));
+    delete snapshot.reviewPresentationMeta;
     presentationSource = presentationPath;
   }
 
@@ -43,22 +76,136 @@ export async function reviewPresentationWorkspace(projectRoot, options = {}) {
   }
 
   const feedback = buildReviewPresentationFeedback(snapshot);
+  if (options.write && options.presentationPath && feedback.violations.length === 0) {
+    snapshot.reviewPresentationMeta = buildReviewPresentationMeta({
+      presentation: snapshot.reviewPresentation,
+      feedback,
+      source: presentationSource,
+    });
+  }
+  const gate = getReviewPresentationGate(snapshot, feedback);
   const result = {
-    ok: feedback.violations.length === 0,
+    ok: gate.ok,
     versionId: snapshot.versionId,
     title: snapshot.title,
     snapshotPath,
     presentationSource,
     presentationContract: feedback.contract,
     presentationFeedback: feedback.violations,
+    reviewPresentationGate: gate,
   };
 
   if (options.write) {
+    if (!gate.ok) {
+      result.writeBlocked = true;
+      return result;
+    }
     await fs.writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
     result.written = snapshotPath;
+    const reviewFiles = await renderValidatedReviewPresentation(resolvedProjectRoot, snapshot);
+    result.reviewPath = reviewFiles.canonicalReview;
+    result.reviewEntryPath = reviewFiles.activeReviewEntry;
   }
 
   return result;
+}
+
+export function getReviewPresentationGate(snapshot, feedback = buildReviewPresentationFeedback(snapshot)) {
+  const errors = [];
+  const presentation = snapshot?.reviewPresentation;
+  const meta = snapshot?.reviewPresentationMeta;
+  if (!presentation || typeof presentation !== 'object' || Array.isArray(presentation)) {
+    errors.push('缺少已由脚本写入的 reviewPresentation。先运行 openprd review-presentation . --template，再填写 presentation JSON。');
+  }
+  if (feedback.violations.length > 0) {
+    errors.push(`reviewPresentation 仍有 ${feedback.violations.length} 个超限或格式问题。请按 presentationFeedback 中的 jsonPath 重写后再写入。`);
+  }
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    errors.push('缺少 reviewPresentationMeta。必须通过 openprd review-presentation --presentation <json> --write --fail-on-violation 写入，不能手工改快照。');
+  } else {
+    const expectedPresentationHash = hashStableJson(presentation ?? null);
+    const expectedViolationsHash = hashStableJson(feedback.violations);
+    if (meta.presentationHash !== expectedPresentationHash) {
+      errors.push('reviewPresentationMeta.presentationHash 与当前 reviewPresentation 不一致，请重新运行 review-presentation 写入。');
+    }
+    if (meta.violationsHash !== expectedViolationsHash) {
+      errors.push('reviewPresentationMeta.violationsHash 与当前校验结果不一致，请重新运行 review-presentation 写入。');
+    }
+    if (!meta.validatedAt) {
+      errors.push('reviewPresentationMeta.validatedAt 缺失，请重新运行 review-presentation 写入。');
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    violations: feedback.violations,
+    requiredCommand: 'openprd review-presentation . --presentation <review-presentation.json> --write --fail-on-violation',
+  };
+}
+
+export function assertReviewPresentationReady(snapshot) {
+  const gate = getReviewPresentationGate(snapshot);
+  if (gate.ok) return gate;
+  const details = gate.violations.slice(0, 6).map((item) => {
+    const pathHint = item.jsonPath ? `${item.jsonPath}: ` : '';
+    const sizeHint = item.maxChars ? ` 当前 ${item.currentChars} 字，限制 ${item.maxChars} 字。` : '';
+    return `- ${pathHint}${item.action}${sizeHint}`;
+  });
+  throw new Error([
+    'OpenPrd 已阻止生成可确认 review.html：评审展示文案必须先通过 review-presentation 脚本写入。',
+    ...gate.errors.map((error) => `- ${error}`),
+    ...details,
+  ].join('\n'));
+}
+
+function buildReviewPresentationMeta({ presentation, feedback, source }) {
+  return {
+    validatedAt: new Date().toISOString(),
+    source: source ?? 'snapshot',
+    presentationHash: hashStableJson(presentation ?? null),
+    violationsHash: hashStableJson(feedback.violations),
+    validator: 'openprd review-presentation',
+  };
+}
+
+function hashStableJson(value) {
+  return crypto.createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function renderValidatedReviewPresentation(projectRoot, snapshot) {
+  const workspaceRoot = path.join(projectRoot, '.openprd');
+  const canonicalReview = canonicalReviewPath({ workspaceRoot }, snapshot.versionId);
+  const activeReviewEntry = defaultReviewArtifactPath({ workspaceRoot });
+  const releaseLedger = await loadReleaseLedger(projectRoot);
+  await writeHtmlArtifact(canonicalReview, renderReviewArtifact({
+    snapshot,
+    projectRelease: buildReleaseLedgerSummary(releaseLedger.ledger),
+  }));
+
+  const versionIndexPath = path.join(workspaceRoot, 'state', 'version-index.json');
+  const versionIndex = await readJson(versionIndexPath);
+  const latestVersionId = versionIndex.at(-1)?.versionId;
+  if (latestVersionId === snapshot.versionId) {
+    await writeHtmlArtifact(activeReviewEntry, renderReviewEntryHtml({
+      entryPath: activeReviewEntry,
+      reviewPath: canonicalReview,
+      title: `${snapshot.title} / 评审入口`,
+    }));
+  }
+  return {
+    canonicalReview,
+    activeReviewEntry: latestVersionId === snapshot.versionId ? activeReviewEntry : null,
+  };
 }
 
 export function normalizeReviewPresentationVersionId(version) {

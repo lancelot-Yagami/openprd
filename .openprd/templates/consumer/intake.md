@@ -1,6 +1,7 @@
 # Consumer Intake
 
-- What moment triggers the need?
-- What emotional or lifestyle value matters?
-- What is the activation event?
-- What keeps the user returning?
+- 用户会在什么场景下第一次想用它？
+- 这个体验最想带来的情绪价值、效率价值或生活方式价值是什么？
+- 第一版最希望用户第一次完成的关键动作是什么？
+- 什么会让用户愿意继续回来使用？
+- 如果只能先做一个最小切片，第一版先做什么最值得？

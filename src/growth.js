@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { appendJsonl, cjoin, exists, readJson, readJsonl, writeJson } from './fs-utils.js';
+import { listBenchmarkRecommendationsWorkspace } from './benchmark.js';
 
 export const OPENPRD_GROWTH_DIR = path.join('.openprd', 'growth');
 export const OPENPRD_GROWTH_CANDIDATES = path.join(OPENPRD_GROWTH_DIR, 'candidates.jsonl');
@@ -12,6 +13,11 @@ export const OPENPRD_STANDARDS_CONFIG = path.join('.openprd', 'standards', 'conf
 export const DEFAULT_GROWTH_CONFIG = {
   enabled: true,
   reviewRequired: true,
+  autoApply: {
+    enabled: true,
+    minConfidence: 0.8,
+    safeTypes: ['code-extension'],
+  },
   candidateLimit: 200,
   scopes: ['project', 'user-local', 'openprd-core'],
   supportedCandidateTypes: [
@@ -25,6 +31,7 @@ export const DEFAULT_GROWTH_CONFIG = {
 };
 
 const SAFE_APPLY_TYPES = new Set(['code-extension', 'exempt-path-segment', 'exempt-file-pattern', 'user-preference']);
+const AUTO_APPLY_TYPES = new Set(['code-extension']);
 
 function normalizePosixPath(value) {
   return String(value ?? '').split(path.sep).join('/');
@@ -93,6 +100,12 @@ function normalizeCandidate(raw = {}) {
     }),
     confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
     suggestedPatch: raw.suggestedPatch ?? null,
+    appliedAt: raw.appliedAt ?? null,
+    appliedChanges: normalizeArray(raw.appliedChanges),
+    applyMode: raw.applyMode ?? null,
+    applyReason: raw.applyReason ?? null,
+    rejectedAt: raw.rejectedAt ?? null,
+    notes: raw.notes ?? null,
     createdAt: raw.createdAt ?? nowIso(),
     updatedAt: raw.updatedAt ?? nowIso(),
   };
@@ -118,6 +131,30 @@ async function writeCandidateEvent(projectRoot, candidate, patch = {}) {
   };
   await appendJsonl(growthPath(projectRoot, OPENPRD_GROWTH_CANDIDATES), event);
   return normalizeCandidate(event);
+}
+
+function normalizeAutoApplyConfig(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const defaultAuto = DEFAULT_GROWTH_CONFIG.autoApply;
+  const minConfidence = Number(source.minConfidence ?? defaultAuto.minConfidence);
+  return {
+    enabled: source.enabled !== false,
+    minConfidence: Number.isFinite(minConfidence) && minConfidence >= 0 && minConfidence <= 1
+      ? minConfidence
+      : defaultAuto.minConfidence,
+    safeTypes: normalizeArray(source.safeTypes ?? defaultAuto.safeTypes).map((item) => String(item).trim()).filter(Boolean),
+  };
+}
+
+function normalizeGrowthConfig(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    ...DEFAULT_GROWTH_CONFIG,
+    ...source,
+    scopes: normalizeArray(source.scopes ?? DEFAULT_GROWTH_CONFIG.scopes),
+    supportedCandidateTypes: normalizeArray(source.supportedCandidateTypes ?? DEFAULT_GROWTH_CONFIG.supportedCandidateTypes),
+    autoApply: normalizeAutoApplyConfig(source.autoApply),
+  };
 }
 
 async function ensureGrowthFiles(projectRoot) {
@@ -165,7 +202,7 @@ async function readGrowthState(projectRoot) {
   };
 }
 
-export async function observeGrowthWorkspace(projectRoot, rawCandidate = {}) {
+export async function observeGrowthWorkspace(projectRoot, rawCandidate = {}, options = {}) {
   const candidate = normalizeCandidate(rawCandidate);
   if (!candidate.type || !candidate.key) {
     return { ok: false, action: 'growth-observe', skipped: true, reason: 'missing-type-or-key', candidate };
@@ -177,15 +214,124 @@ export async function observeGrowthWorkspace(projectRoot, rawCandidate = {}) {
     return { ok: true, action: 'growth-observe', skipped: true, reason: `candidate-${existing.status}`, candidate: existing };
   }
   if (existing?.status === 'pending') {
-    return { ok: true, action: 'growth-observe', skipped: true, reason: 'candidate-already-pending', candidate: existing };
+    const autoApplyDecision = assessAutoApplyGrowthCandidate(existing, options.autoApply);
+    if (autoApplyDecision.ok) {
+      const applied = await applyGrowthCandidate(projectRoot, existing, {
+        mode: 'auto',
+        reason: autoApplyDecision.reason,
+      });
+      return {
+        ...applied,
+        action: 'growth-observe',
+        skipped: false,
+        autoApplied: true,
+        autoApplyDecision,
+      };
+    }
+    return {
+      ok: true,
+      action: 'growth-observe',
+      skipped: true,
+      reason: 'candidate-already-pending',
+      candidate: existing,
+      autoApplied: false,
+      autoApplyDecision,
+    };
   }
   const stored = await writeCandidateEvent(projectRoot, candidate);
-  return { ok: true, action: 'growth-observe', skipped: false, candidate: stored };
+  const autoApplyDecision = assessAutoApplyGrowthCandidate(stored, options.autoApply);
+  if (autoApplyDecision.ok) {
+    const applied = await applyGrowthCandidate(projectRoot, stored, {
+      mode: 'auto',
+      reason: autoApplyDecision.reason,
+    });
+    return {
+      ...applied,
+      action: 'growth-observe',
+      skipped: false,
+      autoApplied: true,
+      autoApplyDecision,
+    };
+  }
+  return {
+    ok: true,
+    action: 'growth-observe',
+    skipped: false,
+    candidate: stored,
+    autoApplied: false,
+    autoApplyDecision,
+  };
+}
+
+export function assessAutoApplyGrowthCandidate(candidate, rawConfig = {}) {
+  const config = normalizeAutoApplyConfig(rawConfig);
+  if (!config.enabled) {
+    return { ok: false, reason: 'auto-apply-disabled' };
+  }
+  if (!AUTO_APPLY_TYPES.has(candidate.type) || !config.safeTypes.includes(candidate.type)) {
+    return { ok: false, reason: 'type-needs-review' };
+  }
+  if (candidate.scope !== 'project') {
+    return { ok: false, reason: 'scope-needs-review' };
+  }
+  if (typeof candidate.confidence !== 'number' || candidate.confidence < config.minConfidence) {
+    return { ok: false, reason: 'confidence-below-threshold' };
+  }
+  const extension = normalizeExtension(candidate.key);
+  if (!extension || candidate.key !== extension) {
+    return { ok: false, reason: 'invalid-extension' };
+  }
+  const patch = candidate.suggestedPatch ?? {};
+  if (
+    patch.file !== OPENPRD_STANDARDS_CONFIG
+    || patch.op !== 'append'
+    || patch.path !== 'developmentStandards.codeFileLines.codeFileExtensions'
+    || normalizeExtension(patch.value) !== extension
+  ) {
+    return { ok: false, reason: 'patch-needs-review' };
+  }
+  return { ok: true, reason: 'safe-code-extension' };
+}
+
+async function applyGrowthCandidate(projectRoot, candidate, options = {}) {
+  if (!SAFE_APPLY_TYPES.has(candidate.type)) {
+    return { ok: false, action: 'growth-apply', projectRoot, candidate, errors: [`Growth candidate type requires manual review: ${candidate.type}`] };
+  }
+
+  const applied = candidate.type === 'user-preference'
+    ? await applyUserPreferenceCandidate(projectRoot, candidate)
+    : await applyStandardsCandidate(projectRoot, candidate);
+  if (!applied.ok) {
+    return { ok: false, action: 'growth-apply', projectRoot, candidate, errors: applied.errors };
+  }
+
+  const stored = await writeCandidateEvent(projectRoot, candidate, {
+    status: 'applied',
+    appliedAt: nowIso(),
+    appliedChanges: applied.changed,
+    applyMode: options.mode ?? 'manual',
+    applyReason: options.reason ?? null,
+  });
+  const acceptedPath = growthPath(projectRoot, OPENPRD_GROWTH_ACCEPTED);
+  const accepted = await readJsonIfExists(acceptedPath, { version: 1, candidates: [] });
+  const acceptedCandidates = normalizeArray(accepted.candidates).filter((item) => item.id !== stored.id);
+  acceptedCandidates.push(stored);
+  await writeJson(acceptedPath, { version: 1, candidates: acceptedCandidates });
+
+  return {
+    ok: true,
+    action: 'growth-apply',
+    projectRoot,
+    candidate: stored,
+    changed: applied.changed,
+    errors: [],
+  };
 }
 
 export async function reviewGrowthWorkspace(projectRoot) {
   const state = await readGrowthState(projectRoot);
   const pending = state.candidates.filter((candidate) => candidate.status === 'pending');
+  const benchmarkRecommendations = await listBenchmarkRecommendationsWorkspace(projectRoot).catch(() => []);
   return {
     ok: true,
     action: 'growth-review',
@@ -198,9 +344,13 @@ export async function reviewGrowthWorkspace(projectRoot) {
       applied: state.candidates.filter((candidate) => candidate.status === 'applied').length,
       rejected: state.candidates.filter((candidate) => candidate.status === 'rejected').length,
     },
-    nextActions: pending.length === 0
-      ? ['当前没有待确认增长候选。']
-      : pending.map((candidate) => `确认后运行 openprd grow . --apply --id ${candidate.id}；不采用则运行 openprd grow . --reject --id ${candidate.id}`),
+    benchmarkRecommendations,
+    nextActions: [
+      ...(pending.length === 0
+        ? ['当前没有待确认增长候选。']
+        : pending.map((candidate) => `收工复盘时确认后运行 openprd grow . --apply --id ${candidate.id}；不采用则运行 openprd grow . --reject --id ${candidate.id}`)),
+      ...benchmarkRecommendations.map((source) => `信源 ${source.sourceKey} 最近 ${source.windowDays} 天已被采纳 ${source.adoptedCount} 次（累计 ${source.totalAdoptedCount} 次），建议确认后运行 ${source.approveCommand} 纳入 benchmark。`),
+    ],
   };
 }
 
@@ -212,9 +362,7 @@ function ensureStandardsConfigShape(config) {
   next.developmentStandards.codeFileLines = next.developmentStandards.codeFileLines && typeof next.developmentStandards.codeFileLines === 'object'
     ? { ...next.developmentStandards.codeFileLines }
     : {};
-  next.growth = next.growth && typeof next.growth === 'object'
-    ? { ...next.growth }
-    : { ...DEFAULT_GROWTH_CONFIG };
+  next.growth = normalizeGrowthConfig(next.growth);
   return next;
 }
 
@@ -283,36 +431,7 @@ export async function applyGrowthCandidateWorkspace(projectRoot, options = {}) {
   if (candidate.status !== 'pending') {
     return { ok: false, action: 'growth-apply', projectRoot, candidate, errors: [`Growth candidate is already ${candidate.status}.`] };
   }
-  if (!SAFE_APPLY_TYPES.has(candidate.type)) {
-    return { ok: false, action: 'growth-apply', projectRoot, candidate, errors: [`Growth candidate type requires manual review: ${candidate.type}`] };
-  }
-
-  const applied = candidate.type === 'user-preference'
-    ? await applyUserPreferenceCandidate(projectRoot, candidate)
-    : await applyStandardsCandidate(projectRoot, candidate);
-  if (!applied.ok) {
-    return { ok: false, action: 'growth-apply', projectRoot, candidate, errors: applied.errors };
-  }
-
-  const stored = await writeCandidateEvent(projectRoot, candidate, {
-    status: 'applied',
-    appliedAt: nowIso(),
-    appliedChanges: applied.changed,
-  });
-  const acceptedPath = growthPath(projectRoot, OPENPRD_GROWTH_ACCEPTED);
-  const accepted = await readJsonIfExists(acceptedPath, { version: 1, candidates: [] });
-  const acceptedCandidates = normalizeArray(accepted.candidates).filter((item) => item.id !== stored.id);
-  acceptedCandidates.push(stored);
-  await writeJson(acceptedPath, { version: 1, candidates: acceptedCandidates });
-
-  return {
-    ok: true,
-    action: 'growth-apply',
-    projectRoot,
-    candidate: stored,
-    changed: applied.changed,
-    errors: [],
-  };
+  return applyGrowthCandidate(projectRoot, candidate, { mode: 'manual' });
 }
 
 export async function rejectGrowthCandidateWorkspace(projectRoot, options = {}) {
@@ -381,6 +500,25 @@ export function validateGrowthConfig(config, errors = []) {
     const limit = Number(growth.candidateLimit);
     if (!Number.isInteger(limit) || limit < 1) {
       errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.candidateLimit must be a positive integer.`);
+    }
+  }
+  if (growth.autoApply !== undefined) {
+    const autoApply = growth.autoApply;
+    if (!autoApply || typeof autoApply !== 'object' || Array.isArray(autoApply)) {
+      errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.autoApply must be an object.`);
+    } else {
+      if (autoApply.enabled !== undefined && typeof autoApply.enabled !== 'boolean') {
+        errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.autoApply.enabled must be a boolean.`);
+      }
+      if (autoApply.minConfidence !== undefined) {
+        const minConfidence = Number(autoApply.minConfidence);
+        if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
+          errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.autoApply.minConfidence must be between 0 and 1.`);
+        }
+      }
+      if (autoApply.safeTypes !== undefined && !Array.isArray(autoApply.safeTypes)) {
+        errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.autoApply.safeTypes must be an array.`);
+      }
     }
   }
   return errors;

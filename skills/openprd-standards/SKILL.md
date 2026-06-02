@@ -17,7 +17,7 @@ OpenPrd standards 管三件事：
 
 研发期还包含一个轻量标准层：`openprd dev-check <path> <file...>` 或 `node scripts/openprd-dev-check.mjs <path> <file...>`，用于 Agent 在代码修改完成后、最终回复前回顾本轮 touched code files 的行数状态和下一步动作建议。
 
-自我成长标准层位于 `.openprd/growth/`：当 dev-check 把未知扩展名识别为代码候选，或执行中发现豁免路径、规则配置、命令习惯、用户偏好需要增量时，先运行 `openprd grow <path> --review`，用户确认后再 `openprd grow <path> --apply --id <candidate-id>`。
+自我成长标准层位于 `.openprd/growth/`：当 dev-check 高置信识别出新的代码扩展名时，可自动补齐识别规则并记录，减少后续重复提醒；执行中发现豁免路径、项目规矩、OpenPrd 默认行为或用户偏好需要增量时，先记录候选，收工时再运行 `openprd grow <path> --review` 集中确认。
 
 维护 OpenPrd 本身时，新增或修改任何配置类能力都要检查是否应该成为 grow-aware 配置：高置信可复用、可被用户习惯影响、会随项目环境变化的配置默认纳入 `openprd grow`；不确定时主动询问用户；一次性固定规则才保留为静态配置。
 
@@ -48,8 +48,8 @@ OpenPrd standards 要求以下文档存在：
 ## 执行规则
 
 - 声称某个 change 就绪前，先运行 `openprd standards <path> --verify`
-- 代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check <path> <file...>`；700 行以内正常，701-1500 行需说明局部职责，超过 1500 行要判断本轮是否扩大职责，扩大则先重构/拆分/解耦并复查，窄 bugfix 或小修暂不拆时说明原因和后续拆分建议
-- dev-check 或执行过程产生 growth candidate 时，只把它当作待确认建议；共享配置必须 review/apply 后才算固化，个人偏好只进入 user-local 范围
+- 代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check <path> <file...>`；700 行以内正常，701-1500 行需留意，超过 1500 行说明后续改动成本较高。若出现需要关注的文件，最终回复必须以 **后续建议** 为标题，用 Markdown 表格列出影响位置、关注程度、规模信号、为什么需要关注、本次处理和后续建议，并按 🔴 → 🟠 → 🟡 排序
+- dev-check 或执行过程产生自我成长项时，区分处理：高置信工具识别补全可以自动固化；用户偏好、项目协作规矩和 OpenPrd 默认行为只作为待确认候选，收工时集中 review
 - 新增配置类能力时同步评审 grow-aware 入口：候选类型、scope、review/apply 行为、拒绝后不重复提示，以及 user-local 与项目共享配置的边界
 - OpenPrd 自动生成的 change tasks 应包含 standards 维护任务
 - 每次新增或修改源码文件，都要做文档影响检查
