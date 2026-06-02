@@ -497,6 +497,44 @@ test('doctor reports optional capabilities without making them blocking and dete
 });
 
 
+test('setup emits Windows-safe Codex hook commands with double-quoted paths', async () => {
+  const originalProject = await makeTempProject();
+  const project = path.join(path.dirname(originalProject), 'project with spaces');
+  const codexHome = path.join(project, 'codex-home');
+  const previousCodexHome = process.env.OPENPRD_CODEX_HOME;
+  process.env.OPENPRD_CODEX_HOME = codexHome;
+  await fs.rename(originalProject, project);
+
+  try {
+    const result = await setupAgentIntegrationWorkspace(project, {
+      tools: 'codex',
+      templatePack: 'agent',
+      enableUserCodexConfig: true,
+      codexHome,
+      platform: 'win32',
+    });
+    assert.equal(result.ok, true);
+
+    const hooks = JSON.parse(await fs.readFile(path.join(project, '.codex', 'hooks.json'), 'utf8'));
+    const promptGroup = findOpenPrdHookGroup(hooks.UserPromptSubmit);
+    assert.ok(promptGroup);
+    assert.equal(promptGroup.hooks[0].command.startsWith('node "'), true);
+    assert.ok(promptGroup.hooks[0].command.includes('/project with spaces/.codex/hooks/openprd-hook.mjs" UserPromptSubmit'));
+    assert.equal(/node '.*openprd-hook\.mjs'/.test(promptGroup.hooks[0].command), false);
+
+    const config = await fs.readFile(path.join(project, '.codex', 'config.toml'), 'utf8');
+    assert.ok(config.includes('openprd-hook.mjs\\" UserPromptSubmit'));
+    assert.ok(config.includes('project with spaces'));
+    assert.equal(/node '.*openprd-hook\.mjs'/.test(config), false);
+  } finally {
+    if (previousCodexHome === undefined) {
+      delete process.env.OPENPRD_CODEX_HOME;
+    } else {
+      process.env.OPENPRD_CODEX_HOME = previousCodexHome;
+    }
+  }
+});
+
 test('clarify treats legacy artifact mode as an inline checklist', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });

@@ -146,11 +146,29 @@ OpenPrd 会沿着两条看得见的循环，越用越贴合你们的协作方式
 npm install -g @openprd/cli
 ```
 
+如果你只是想先跑起来，或者 Windows 里刚装完 CLI 但 `openprd` 还没出现在 `PATH`，也可以直接用 `npx`：
+
+```bash
+npx @openprd/cli@latest --help
+npx @openprd/cli@latest init . --template-pack agent
+```
+
 安装后验证：
 
 ```bash
 openprd --help
 ```
+
+### Windows 排查
+
+如果全局安装成功后依然提示找不到 `openprd`，先检查：
+
+```powershell
+where openprd
+npm config get prefix
+```
+
+如果 `where openprd` 没有结果，把 npm global prefix 加到 `PATH` 后再重新打开终端。Windows 下这个目录通常是 `%AppData%\npm`，不是 Unix 常见的 `{prefix}/bin`。
 
 之后更新 CLI 时先预演，再执行：
 
@@ -165,6 +183,12 @@ openprd self-update
 
 ```bash
 openprd init /path/to/project --template-pack agent
+```
+
+如果 `openprd` 还没进 `PATH`，直接把同一条命令前面换成 `npx @openprd/cli@latest` 即可：
+
+```bash
+npx @openprd/cli@latest init /path/to/project --template-pack agent
 ```
 
 `init` 会创建 `.openprd/`、`docs/basic/`、`AGENTS.md`，并生成 Codex / Claude / Cursor 三端引导。Codex 项目会同时写入 `.codex/config.toml`、`.codex/hooks.json`、`.codex/hooks/openprd-hook.mjs`，并开启用户级 Codex `codex_hooks = true`。

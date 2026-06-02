@@ -2,13 +2,13 @@
   "version": 1,
   "enabled": true,
   "strategy": "semver",
-  "currentVersion": "0.1.2",
+  "currentVersion": "0.1.3",
   "versions": [
     {
       "version": "0.1.2",
-      "status": "current",
+      "status": "released",
       "createdAt": "2026-06-02 21:28:04",
-      "updatedAt": "2026-06-02 21:28:23",
+      "updatedAt": "2026-06-03 01:00:00",
       "notes": null,
       "items": [
         {
@@ -79,8 +79,40 @@
         }
       ],
       "tag": null
+    },
+    {
+      "version": "0.1.3",
+      "status": "current",
+      "createdAt": "2026-06-03 01:00:00",
+      "updatedAt": "2026-06-03 01:00:00",
+      "notes": null,
+      "items": [
+        {
+          "type": "修复",
+          "summary": "修复",
+          "detail": "Windows 下带空格路径的 Codex hook command quoting，避免 hook 调用失败",
+          "sentence": "修复：Windows 下带空格路径的 Codex hook command quoting，避免 hook 调用失败",
+          "recordedAt": "2026-06-03 01:00:00",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-20260603-win-hook-quoting"
+          }
+        },
+        {
+          "type": "优化",
+          "summary": "优化",
+          "detail": "Windows 全局安装排查说明，并提供 npx 启动兜底路径",
+          "sentence": "优化：Windows 全局安装排查说明，并提供 npx 启动兜底路径",
+          "recordedAt": "2026-06-03 01:00:00",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-20260603-win-install-docs"
+          }
+        }
+      ],
+      "tag": null
     }
   ],
   "createdAt": "2026-06-02 21:28:04",
-  "updatedAt": "2026-06-02 21:28:23"
+  "updatedAt": "2026-06-03 01:00:00"
 }

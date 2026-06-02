@@ -174,11 +174,29 @@ Install from npm:
 npm install -g @openprd/cli
 ```
 
+If you want a zero-PATH first run, or you are on Windows and `openprd` is not available yet, use `npx` directly:
+
+```bash
+npx @openprd/cli@latest --help
+npx @openprd/cli@latest init . --template-pack agent
+```
+
 Then verify:
 
 ```bash
 openprd --help
 ```
+
+### Windows Troubleshooting
+
+If the global install succeeds but `openprd` is still not found, check:
+
+```powershell
+where openprd
+npm config get prefix
+```
+
+If `where openprd` returns nothing, add the npm global prefix to `PATH` and reopen the terminal. On Windows that directory is usually `%AppData%\npm`, not the Unix-style `{prefix}/bin`.
 
 Update the installed CLI later with a dry-run first:
 
@@ -193,6 +211,12 @@ openprd self-update
 
 ```bash
 openprd init /path/to/project --template-pack agent
+```
+
+If `openprd` is not on `PATH` yet, run the same init command through `npx`:
+
+```bash
+npx @openprd/cli@latest init /path/to/project --template-pack agent
 ```
 
 `init` creates `.openprd/`, `docs/basic/`, `AGENTS.md`, and generated Codex / Claude / Cursor guidance. Codex projects also get `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/openprd-hook.mjs`, and user-level Codex `codex_hooks = true`.

@@ -69,6 +69,7 @@ async function initWorkspace(projectRoot, options) {
     codexHome: options.codexHome,
     cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
+    platform: options.platform,
     hookProfile: options.hookProfile,
   });
   const config = workspace.data.config ?? {};
@@ -148,6 +149,7 @@ async function setupAgentIntegrationWorkspace(projectRoot, options = {}) {
     codexHome: options.codexHome,
     cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
+    platform: options.platform,
     hookProfile: options.hookProfile,
   });
   return { ...agentIntegration, initialized: false, migration, standards, quality, growth };
@@ -165,6 +167,7 @@ async function updateAgentIntegrationWorkspace(projectRoot, options = {}) {
     codexHome: options.codexHome,
     cursorHome: options.cursorHome,
     openprdHome: options.openprdHome,
+    platform: options.platform,
     hookProfile: options.hookProfile,
   });
   return { ...agentIntegration, migration, standards, quality, growth };

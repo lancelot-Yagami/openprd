@@ -1194,15 +1194,21 @@ function quoteForToml(value) {
   return JSON.stringify(value);
 }
 
-function hookCommand(projectRoot, eventName) {
+function resolveShellPlatform(options = {}) {
+  return options.platform ?? process.platform;
+}
+
+function hookCommand(projectRoot, eventName, options = {}) {
   const hookPath = cjoin(projectRoot, '.codex', 'hooks', 'openprd-hook.mjs');
-  return `node ${quoteShell(hookPath)} ${eventName}`;
+  return `node ${quoteShell(hookPath, options)} ${eventName}`;
 }
 
-function quoteShell(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+function quoteShell(value, options = {}) {
+  if (resolveShellPlatform(options) === 'win32') {
+    return `"${String(value).replace(/"/g, '""')}"`;
+  }
+  return `'${String(value).replace(/'/g, `'\''`)}'`;
 }
-
 function renderCodexHookRunner() {
   return readFileSync(cjoin(PACKAGE_ROOT, 'src', 'codex-hook-runner-template.mjs'), 'utf8').trimEnd();
 }
@@ -1257,7 +1263,7 @@ function codexHooksTomlBlock(projectRoot, options = {}) {
     if (matcher) {
       groups.push(`matcher = ${quoteForToml(matcher)}`);
     }
-    groups.push(`hooks = [{ type = "command", command = ${quoteForToml(hookCommand(projectRoot, eventName))}, timeout = 15000 }]`);
+    groups.push(`hooks = [{ type = "command", command = ${quoteForToml(hookCommand(projectRoot, eventName, options))}, timeout = 15000 }]`);
     groups.push('');
   }
   return groups.join('\n').trimEnd();
@@ -1314,7 +1320,7 @@ function codexHookGroup(projectRoot, eventName, options = {}) {
     hooks: [
       {
         type: 'command',
-        command: hookCommand(projectRoot, eventName),
+        command: hookCommand(projectRoot, eventName, options),
         timeout: 15000,
       },
     ],
