@@ -1673,7 +1673,8 @@ function runOpenPrd(args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf8',
-    timeout: 15000,
+    timeout: 60000,
+    maxBuffer: 16 * 1024 * 1024,
     env: process.env,
   });
   return {

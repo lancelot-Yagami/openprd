@@ -92,7 +92,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('run exposes hook-stable context and records hook iterations', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'consumer' });

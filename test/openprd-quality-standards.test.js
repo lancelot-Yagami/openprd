@@ -90,7 +90,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('quality verify writes html eval report and learn creates experience skill', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });

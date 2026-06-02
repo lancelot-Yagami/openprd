@@ -90,7 +90,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('setup enables Codex hooks while preserving user hook groups', async () => {
   const project = await makeTempProject();
   const codexHome = path.join(project, 'codex-home');

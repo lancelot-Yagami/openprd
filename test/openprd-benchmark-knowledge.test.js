@@ -90,7 +90,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('benchmark add/list/approve/verify and update generated benchmark guidance', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });

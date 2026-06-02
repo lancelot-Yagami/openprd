@@ -92,7 +92,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 
 test('change summary formatter prefers user-visible verbs for commits and summaries', () => {
   const entry = buildChangeEntry('支持用户直接查看版本说明', { fallbackType: '新增' });

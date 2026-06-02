@@ -1,6 +1,6 @@
 import test from 'node:test';
 import { buildGitHubReleasePayload, writeGitHubReleaseNotes } from '../src/github-release.js';
-import { assert, fs, path, initWorkspace, makeTempProject, releaseWorkspace } from 'openprd-test-helpers';
+import { assert, fs, path, initWorkspace, makeTempProject, releaseWorkspace } from './helpers/openprd-test-helpers.js';
 
 test('github release payload renders from the matching release ledger entry', async () => {
   const project = await makeTempProject();

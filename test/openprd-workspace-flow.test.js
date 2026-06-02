@@ -91,7 +91,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('validate fails for an empty project', async () => {
   const project = await makeTempProject();
 

@@ -91,7 +91,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('openprd discovery initializes a resumable coverage run', async () => {
   const project = await makeTempProject();
   await fs.mkdir(path.join(project, 'src'), { recursive: true });
