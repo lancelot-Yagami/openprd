@@ -297,12 +297,16 @@ async function collectFleetProjectHealth(projectPath, options, doctorWorkspace) 
     return { ok: true, errors: [] };
   }
   try {
+    // Batch refresh should focus on generated guidance and workspace skeleton health.
+    // Legacy content-doc debt remains available in direct doctor/standards checks.
     const doctor = await doctorWorkspace(projectPath, {
       tools: options.tools ?? 'all',
       hookProfile: options.hookProfile,
       enableUserCodexConfig: Boolean(options.enableUserCodexConfig),
       codexHome: options.codexHome,
       openprdHome: options.openprdHome,
+      docsContent: false,
+      sourceManuals: false,
     });
     return {
       ok: doctor.ok,

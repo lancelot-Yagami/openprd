@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
+import { buildReviewExportPayload } from '../src/html-artifacts.js';
 import {
   captureWorkspace,
   clarifyWorkspace,
@@ -211,6 +212,12 @@ describe('Codex requirement gate', () => {
     assert.equal(readOnlyProductPromptPayload.continue, true);
     assert.equal(await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gate.json')), false);
 
+    const consultativeFeedbackPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '用户反馈 OpenPrd 这个 hook 在现有功能优化上有点过度，你看什么原因，先分析一下。',
+    });
+    assert.equal(consultativeFeedbackPromptPayload.continue, true);
+    assert.equal(await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gate.json')), false);
+
     const directBugfixPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: 'Windows用户反馈，他在更新新版本的时候，出现如图的一个报错，请你排查一下什么原因，并如果能定位到原因，直接帮我修复',
     });
@@ -388,8 +395,114 @@ describe('Codex requirement gate', () => {
     assert.equal(executionAuthorizedGate.status, 'execution-authorized');
   });
 
-  test('Codex hook supports silent-record review lanes when the user opts out of extra review confirmation', async () => {
-    const { project } = await makeCodexHookProject();
+test('Codex hook accepts a later same-session execution instruction once review and tasks are ready', async () => {
+  const { project } = await makeCodexHookProject();
+
+    const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '在【Agent管理】模块下，我希望增加一个【团队搭建】放到【Agent 工区】菜单下面，这个模块主要是将 Agent市场、技能库和 CLI库按流程串联起来，一站式完成配置。',
+    });
+    assert.equal(requirementPromptPayload.continue, true);
+
+    await captureFreshRequirementState(project, '用户已经确认 Team Builder 的需求范围。');
+    const synthesizedTeamBuilder = await synthesizeWorkspace(project, {
+      title: 'Team Builder',
+      owner: 'PM',
+      problemStatement: 'Agents need a guided team setup flow',
+      whyNow: 'Configuration spans several libraries',
+      primaryUsers: ['Agent operators'],
+      goals: ['Guide team setup'],
+      successMetrics: ['Setup succeeds'],
+      acceptanceGoals: ['Operators can complete team setup'],
+      inScope: ['Agent workspace team setup'],
+      outOfScope: ['Billing'],
+      primaryFlows: ['Operator configures a team'],
+      functional: ['Create the team setup flow'],
+      productType: 'agent',
+    });
+
+    await reviewWorkspace(project, { mark: 'confirmed' });
+    await generateOpenSpecChangeWorkspace(project, { change: 'team-builder-late-execution' });
+
+    const blockedPatchPayload = runCodexHook(project, 'PreToolUse', {
+      tool_name: 'apply_patch',
+      tool_input: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n+// still waiting for execution instruction\n*** End Patch',
+    });
+    assert.equal(blockedPatchPayload.decision, 'block');
+
+    const lateExecutionPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '那你去修复吧，不需要再跟我确认。',
+    });
+    assert.equal(lateExecutionPromptPayload.continue, true);
+    const executionGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
+    assert.equal(executionGate.active, false);
+    assert.equal(executionGate.status, 'user-confirmed-for-execution');
+
+    const allowedPatchPayload = runCodexHook(project, 'PreToolUse', {
+      tool_name: 'apply_patch',
+      tool_input: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n+// execution confirmed later in the same session\n*** End Patch',
+    });
+  assert.equal(allowedPatchPayload.decision, undefined);
+  assert.equal(allowedPatchPayload.continue, true);
+  assert.equal(synthesizedTeamBuilder.snapshot.versionId, 'v0001');
+});
+
+test('Codex hook treats review-page continue copy as review authorization plus same-lane continuation intent', async () => {
+  const { project } = await makeCodexHookProject();
+
+  const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+    prompt: '在【Agent管理】模块下，我希望增加一个【团队搭建】放到【Agent 工区】菜单下面，这个模块主要是将 Agent市场、技能库和 CLI库按流程串联起来，一站式完成配置。',
+  });
+  assert.equal(requirementPromptPayload.continue, true);
+
+  await captureFreshRequirementState(project, '用户已经确认 Team Builder 的需求范围。');
+  const synthesizedTeamBuilder = await synthesizeWorkspace(project, {
+    title: 'Team Builder',
+    owner: 'PM',
+    problemStatement: 'Agents need a guided team setup flow',
+    whyNow: 'Configuration spans several libraries',
+    primaryUsers: ['Agent operators'],
+    goals: ['Guide team setup'],
+    successMetrics: ['Setup succeeds'],
+    acceptanceGoals: ['Operators can complete team setup'],
+    inScope: ['Agent workspace team setup'],
+    outOfScope: ['Billing'],
+    primaryFlows: ['Operator configures a team'],
+    functional: ['Create the team setup flow'],
+    productType: 'agent',
+  });
+
+  const reviewCommand = `openprd review . --mark confirmed --version ${synthesizedTeamBuilder.snapshot.versionId} --digest ${synthesizedTeamBuilder.snapshot.digest} --work-unit ${synthesizedTeamBuilder.workUnitId}`;
+  const reviewCopyPrompt = [
+    'OpenPrD Review: 认可并继续下一步',
+    '当前稳定评审稿已确认。请先记录这版稳定评审稿，并继续当前 OpenPrd 下一步。若 review 后 tasks 已就绪但还需要执行授权，请直接展示执行确认清单，不要再泛泛确认。',
+    '命令:',
+    reviewCommand,
+    '上下文:',
+    JSON.stringify(buildReviewExportPayload(synthesizedTeamBuilder.snapshot), null, 2),
+  ].join('\n\n');
+
+  const reviewContinuePayload = runCodexHook(project, 'UserPromptSubmit', {
+    prompt: reviewCopyPrompt,
+  });
+  assert.equal(reviewContinuePayload.continue, true);
+  assert.ok(reviewContinuePayload.hookSpecificOutput.additionalContext.includes('确认当前稳定评审稿并继续当前 OpenPrd 下一步'));
+  assert.ok(reviewContinuePayload.hookSpecificOutput.additionalContext.includes('先记录这一个版本的 review 状态，再按同一条 lane 往下推进'));
+  assert.ok(reviewContinuePayload.hookSpecificOutput.additionalContext.includes('执行确认清单'));
+
+  const requirementGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
+  assert.equal(requirementGate.status, 'review-confirmation-authorized');
+  assert.equal(requirementGate.reviewActionAuthorization.continueAfterReview, true);
+
+  const authorizedReviewConfirmPayload = runCodexHook(project, 'PreToolUse', {
+    tool_name: 'Bash',
+    tool_input: { cmd: reviewCommand },
+  });
+  assert.equal(authorizedReviewConfirmPayload.decision, undefined);
+  assert.equal(authorizedReviewConfirmPayload.continue, true);
+});
+
+test('Codex hook supports silent-record review lanes when the user opts out of extra review confirmation', async () => {
+  const { project } = await makeCodexHookProject();
 
     const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: '请直接实现：新增 Agent 团队模板导入流，不需要评审，不需要确认，你直接做。',
@@ -987,7 +1100,9 @@ describe('Codex requirement gate', () => {
       prompt: '微信小程序这个页面按钮点了没反应，直接帮我修一下并验证。',
     });
     assert.equal(weappPrompt.continue, true);
-    assert.ok(weappPrompt.hookSpecificOutput.additionalContext.includes('weapp-dev-mcp'));
+    assert.ok(weappPrompt.hookSpecificOutput.additionalContext.includes('本地小程序运行态验证'));
+    assert.ok(weappPrompt.hookSpecificOutput.additionalContext.includes('不要为了验证自动重开应用'));
+    assert.equal(weappPrompt.hookSpecificOutput.additionalContext.includes('weapp-dev-mcp'), false);
     const weappPatch = runCodexHook(project, 'PreToolUse', {
       tool_name: 'apply_patch',
       tool_input: '*** Begin Patch\n*** Update File: miniprogram/pages/index.js\n@@\n+// fix tap handler\n*** End Patch',
@@ -995,6 +1110,15 @@ describe('Codex requirement gate', () => {
     assert.equal(weappPatch.continue, true);
     const stopReminder = runCodexHook(project, 'Stop', {});
     assert.equal(stopReminder.continue, true);
-    assert.ok(stopReminder.hookSpecificOutput.additionalContext.includes('微信小程序验证仍未完成'));
+    assert.ok(stopReminder.hookSpecificOutput.additionalContext.includes('小程序运行态验证仍未完成'));
+    assert.equal(stopReminder.hookSpecificOutput.additionalContext.includes('weapp-dev-mcp'), false);
+    const weappCopyPrompt = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '把微信小程序首页按钮文案改短一点。',
+    });
+    assert.equal(weappCopyPrompt.continue, true);
+    assert.equal(weappCopyPrompt.hookSpecificOutput.additionalContext.includes('本地小程序运行态验证'), false);
+    const copyStopReminder = runCodexHook(project, 'Stop', {});
+    assert.equal(copyStopReminder.continue, true);
+    assert.equal(copyStopReminder.hookSpecificOutput?.additionalContext?.includes('小程序运行态验证仍未完成') ?? false, false);
   });
 });

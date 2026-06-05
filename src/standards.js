@@ -815,10 +815,12 @@ export async function checkStandardsWorkspace(projectRoot, options = {}) {
       continue;
     }
     const text = await readText(docPath);
-    if (!text.includes(`# ${doc.title}`)) {
+    if (options.docsContent !== false && !text.includes(`# ${doc.title}`)) {
       errors.push(`${relativePath} 缺少标题: ${doc.title}`);
     }
-    validateTextSections(relativePath, text, doc.sections, errors);
+    if (options.docsContent !== false) {
+      validateTextSections(relativePath, text, doc.sections, errors);
+    }
     if (hasProjectSource && !openPrdToolProject && options.docsContent !== false && DOC_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(text))) {
       errors.push(`${relativePath} 仍包含模板占位内容，必须更新为当前项目事实。`);
     }
@@ -861,7 +863,7 @@ export async function checkStandardsWorkspace(projectRoot, options = {}) {
   checks.push(`Manual templates: ${templateFiles.filter((file) => file.exists).length}/${STANDARD_TEMPLATE_FILES.length}.`);
   const lineConfig = config?.developmentStandards?.codeFileLines ?? DEFAULT_DEVELOPMENT_STANDARDS.codeFileLines;
   checks.push(`Development standards: code files ok <= ${lineConfig.okMax} lines, attention <= ${lineConfig.attentionMax} lines.`);
-  checks.push(`Growth layer: ${config?.growth?.enabled === false ? 'disabled' : 'enabled'} with user review required before applying candidates.`);
+  checks.push(`Growth layer: ${config?.growth?.enabled === false ? 'disabled' : 'enabled'}; code-extension candidates can auto-apply, remaining candidates stay in wrap-up review.`);
 
   return {
     ok: errors.length === 0,

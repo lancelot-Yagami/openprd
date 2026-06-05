@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
+  "status": "promoted",
+  "createdAt": "2026-05-30 13:39:11",
+  "updatedAt": "2026-06-05 09:05:29",
+  "sourceKind": "diagnostic-report",
+  "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758",
+  "title": "本轮项目回顾",
+  "summary": "本轮围绕 13 个可沉淀文件生成回顾。 本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。 已记录 2 条回顾信号。",
+  "categories": [
+    "hidden-debug-knowledge",
+    "agent-misjudgment",
+    "high-impact-fix"
+  ],
+  "reasons": [
+    "本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。",
+    "这次改动直接影响 Agent / harness / hook / skill 行为，后续很容易再次踩到同类判断问题。",
+    "这次修复已经带有验证或收尾证据，适合尽快抽象成项目级研发经验。"
+  ],
+  "touchedFiles": [
+    "src/workspace-core.js",
+    "src/openprd.js",
+    "src/fleet.js",
+    "src/standards.js",
+    "test/helpers/openprd-test-helpers.js",
+    "test/openprd-run-fleet.test.js",
+    "test/openprd-quality-standards.test.js",
+    "test/openprd-agent-integration.test.js",
+    "test/openprd-benchmark-knowledge.test.js",
+    "test/openprd.test.js",
+    "test/openprd-workspace-flow.test.js",
+    "test/openprd-discovery-changes.test.js",
+    "test/openprd-github-release.test.js"
+  ],
+  "reviewSignals": [
+    {
+      "id": "run-verify",
+      "kind": "run-verify",
+      "at": "2026-06-05 09:05:29",
+      "ok": true,
+      "productionReady": true,
+      "attentionGates": [],
+      "summary": "run verify passed",
+      "touchedFiles": []
+    },
+    {
+      "id": "dev-check",
+      "kind": "dev-check",
+      "at": "2026-06-05 09:04:20",
+      "ok": true,
+      "productionReady": null,
+      "attentionGates": [],
+      "summary": "dev-check attention=9, warning=1",
+      "touchedFiles": [
+        "src/workspace-core.js",
+        "src/openprd.js",
+        "src/fleet.js",
+        "src/standards.js",
+        "test/helpers/openprd-test-helpers.js",
+        "test/openprd-run-fleet.test.js",
+        "test/openprd-quality-standards.test.js",
+        "test/openprd-agent-integration.test.js",
+        "test/openprd-benchmark-knowledge.test.js",
+        "test/openprd.test.js",
+        "test/openprd-workspace-flow.test.js",
+        "test/openprd-discovery-changes.test.js",
+        "test/openprd-github-release.test.js"
+      ]
+    }
+  ],
+  "files": {
+    "candidate": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/candidate.json",
+    "candidateDir": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758",
+    "draftSkill": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md"
+  },
+  "suggestedLearnCommand": "openprd quality . --learn --from .openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758"
+}

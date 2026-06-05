@@ -1,12 +1,27 @@
 {
   "version": 1,
-  "activeChange": "verify-boundaries-and-historical-refresh",
-  "updatedAt": "2026-05-24 01:56:59",
+  "activeChange": "adaptive-project-framing",
+  "updatedAt": "2026-06-02 15:03:05",
   "changes": {
     "verify-boundaries-and-historical-refresh": {
       "id": "verify-boundaries-and-historical-refresh",
       "status": "active",
       "activatedAt": "2026-05-24 01:56:59"
+    },
+    "test-strategy-router": {
+      "id": "test-strategy-router",
+      "status": "active",
+      "activatedAt": "2026-05-30 12:36:28"
+    },
+    "openprd": {
+      "id": "openprd",
+      "status": "active",
+      "activatedAt": "2026-06-02 14:57:22"
+    },
+    "adaptive-project-framing": {
+      "id": "adaptive-project-framing",
+      "status": "active",
+      "activatedAt": "2026-06-02 15:03:05"
     }
   }
 }

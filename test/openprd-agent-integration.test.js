@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { buildProcessInvocation } from '../src/codex-runtime.js';
 
 import {
   assert,
@@ -90,7 +91,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('setup enables Codex hooks while preserving user hook groups', async () => {
   const project = await makeTempProject();
   const codexHome = path.join(project, 'codex-home');
@@ -164,7 +165,10 @@ test('setup enables Codex hooks while preserving user hook groups', async () => 
     assert.ok(generatedAgents.includes('separate current-task status from workspace-level debt'));
     assert.ok(generatedAgents.includes('when only `feature-coverage` is pending'));
     assert.ok(generatedAgents.includes('secrets-vault'));
-    assert.ok(generatedAgents.includes('weapp-dev-mcp'));
+    assert.ok(generatedAgents.includes('最小足够验证'));
+    assert.ok(generatedAgents.includes('本地小程序运行态验证'));
+    assert.ok(generatedAgents.includes('不要为了验证自动重开应用'));
+    assert.equal(generatedAgents.includes('weapp-dev-mcp'), false);
     assert.ok(generatedAgents.includes('resolve_library_id -> query_docs'));
     assert.ok(generatedAgents.includes('Codex 原生 Image 2'));
     assert.ok(generatedAgents.includes('独立素材输出（standalone asset）'));
@@ -238,7 +242,10 @@ test('setup enables Codex hooks while preserving user hook groups', async () => 
     assert.ok(generatedSharedSkill.includes('默认按性价比选方案'));
     assert.ok(generatedSharedSkill.includes('AGENTS.md` 只保留轻量合同'));
     assert.ok(generatedSharedSkill.includes('secrets-vault'));
-    assert.ok(generatedSharedSkill.includes('weapp-dev-mcp'));
+    assert.ok(generatedSharedSkill.includes('运行态证据'));
+    assert.ok(generatedSharedSkill.includes('不要为了验证自动重开应用'));
+    assert.ok(generatedSharedSkill.includes('当前环境已配置的小程序本地验证能力'));
+    assert.equal(generatedSharedSkill.includes('weapp-dev-mcp'), false);
     assert.ok(generatedSharedSkill.includes('Localizable'));
     assert.ok(generatedSharedSkill.includes('彩色 Mermaid'));
     assert.ok(generatedSharedSkill.includes('不要中途打断当前任务'));
@@ -682,6 +689,21 @@ test('Codex runtime health diagnoses optional dependency failure without repairi
   assert.equal(runtime.preflight.diagnostic.missingPackage, '@openai/codex-darwin-arm64');
   assert.equal(runtime.repairCommand.display, 'npm install -g @openai/codex@latest');
   assert.ok(runtime.errors.some((error) => error.includes('--repair-agent')));
+});
+
+test('Codex runtime wraps bare Windows commands through cmd.exe for npm shims', () => {
+  const invocation = buildProcessInvocation('codex', ['--version'], {
+    platform: 'win32',
+    env: {
+      ...process.env,
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+    },
+  });
+
+  assert.equal(invocation.command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(invocation.args, ['/d', '/s', '/c', 'codex --version']);
+  assert.equal(invocation.display, 'codex --version');
+  assert.equal(invocation.shell, false);
 });
 
 test('Codex runtime repair runs explicit npm install and rechecks version', async () => {

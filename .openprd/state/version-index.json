@@ -11,5 +11,57 @@
     "digest": "dc988d7a94c07d2a8070968a71ddacffb374eaeee12aa85eb93231e06dd7b077",
     "workUnitId": "wu-20260524015648-6d33ded7",
     "targetRoot": "/Users/chaojifeng/Projects/harness-engineer/openprd"
+  },
+  {
+    "versionNumber": 2,
+    "versionId": "v0002",
+    "createdAt": "2026-06-02 11:39:56",
+    "title": "OpenPrd 用户视角变化摘要",
+    "owner": "Codex",
+    "productType": "agent",
+    "templatePack": "agent",
+    "status": "synthesized",
+    "digest": "e44eccd0d6fe1a7fd962ece31187f920e1a71de76122d15b826fb0a66d934d35",
+    "workUnitId": "wu-20260602113956-a99b5b88",
+    "targetRoot": "/Users/chaojifeng/Projects/harness-engineer/openprd"
+  },
+  {
+    "versionNumber": 3,
+    "versionId": "v0003",
+    "createdAt": "2026-06-02 12:22:44",
+    "title": "OpenPrd 用户视角变化摘要",
+    "owner": "Codex",
+    "productType": "agent",
+    "templatePack": "agent",
+    "status": "synthesized",
+    "digest": "f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918",
+    "workUnitId": "wu-20260602122244-78656aaf",
+    "targetRoot": "/Users/chaojifeng/Projects/harness-engineer/openprd"
+  },
+  {
+    "versionNumber": 4,
+    "versionId": "v0004",
+    "createdAt": "2026-06-02 12:24:42",
+    "title": "OpenPrd 项目级版本轨道与变化摘要",
+    "owner": "Codex",
+    "productType": "agent",
+    "templatePack": "agent",
+    "status": "synthesized",
+    "digest": "0dbead578a9472100fb0c7cf185cd5500acd2d59830794cfa120f4f6976ee3f7",
+    "workUnitId": "wu-20260602122442-e96489e2",
+    "targetRoot": "/Users/chaojifeng/Projects/harness-engineer/openprd"
+  },
+  {
+    "versionNumber": 5,
+    "versionId": "v0005",
+    "createdAt": "2026-06-02 13:28:35",
+    "title": "OpenPrd 首轮项目画像与自适应需求初始化",
+    "owner": "Codex",
+    "productType": "agent",
+    "templatePack": "agent",
+    "status": "synthesized",
+    "digest": "7f0e2d2730982a2ae96647d2377f6204e54f8adadf1b18b05f4bc7167046c575",
+    "workUnitId": "wu-20260602132835-695429e8",
+    "targetRoot": "/Users/chaojifeng/Projects/harness-engineer/openprd"
   }
 ]

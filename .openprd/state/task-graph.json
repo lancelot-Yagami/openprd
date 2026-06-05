@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-28 22:44:08",
-  "nextReadyNode": "clarify",
+  "generatedAt": "2026-06-05 09:05:28",
+  "nextReadyNode": "diagram",
   "workflow": [
     {
       "id": "clarify",
       "label": "clarify",
       "kind": "workflow-step",
-      "status": "ready",
+      "status": "done",
       "dependsOn": []
     },
     {
@@ -106,7 +106,7 @@
       "id": "open-questions",
       "label": "open-questions.md",
       "kind": "record",
-      "status": "ready",
+      "status": "done",
       "dependsOn": [
         "interview"
       ]
@@ -160,7 +160,7 @@
       "id": "intake-reflection",
       "label": "intake-reflection.md",
       "kind": "record",
-      "status": "ready",
+      "status": "done",
       "dependsOn": [
         "clarify"
       ]
@@ -208,7 +208,7 @@
       "id": "clarify",
       "label": "clarify",
       "kind": "workflow-step",
-      "status": "ready",
+      "status": "done",
       "dependsOn": []
     },
     {
@@ -305,7 +305,7 @@
       "id": "open-questions",
       "label": "open-questions.md",
       "kind": "record",
-      "status": "ready",
+      "status": "done",
       "dependsOn": [
         "interview"
       ]
@@ -359,7 +359,7 @@
       "id": "intake-reflection",
       "label": "intake-reflection.md",
       "kind": "record",
-      "status": "ready",
+      "status": "done",
       "dependsOn": [
         "clarify"
       ]
@@ -509,125 +509,5 @@
       "relation": "produces"
     }
   ],
-  "blockers": [
-    {
-      "id": "problem.evidence",
-      "label": "证据",
-      "question": "有哪些证据支持这个问题？",
-      "section": "problem",
-      "status": "blocked"
-    },
-    {
-      "id": "users.stakeholders",
-      "label": "相关方",
-      "question": "还有谁会参与或受到影响？",
-      "section": "users",
-      "status": "blocked"
-    },
-    {
-      "id": "scenarios.edgeCases",
-      "label": "边界情况",
-      "question": "哪些边界情况需要处理？",
-      "section": "scenarios",
-      "status": "blocked"
-    },
-    {
-      "id": "requirements.functional",
-      "label": "功能需求",
-      "question": "产品必须做什么？",
-      "section": "requirements",
-      "status": "blocked"
-    },
-    {
-      "id": "requirements.nonFunctional",
-      "label": "非功能需求",
-      "question": "有哪些性能、可靠性或安全要求？",
-      "section": "requirements",
-      "status": "blocked"
-    },
-    {
-      "id": "requirements.businessRules",
-      "label": "业务规则",
-      "question": "需要遵守哪些业务规则？",
-      "section": "requirements",
-      "status": "blocked"
-    },
-    {
-      "id": "constraints.technical",
-      "label": "技术约束",
-      "question": "存在哪些技术约束？",
-      "section": "constraints",
-      "status": "blocked"
-    },
-    {
-      "id": "constraints.compliance",
-      "label": "合规要求",
-      "question": "是否存在合规或策略约束？",
-      "section": "constraints",
-      "status": "blocked"
-    },
-    {
-      "id": "constraints.dependencies",
-      "label": "依赖",
-      "question": "这个需求依赖什么？",
-      "section": "constraints",
-      "status": "blocked"
-    },
-    {
-      "id": "risks.assumptions",
-      "label": "假设",
-      "question": "我们做了哪些假设？",
-      "section": "risks",
-      "status": "blocked"
-    },
-    {
-      "id": "risks.risks",
-      "label": "风险",
-      "question": "需要关注哪些风险？",
-      "section": "risks",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.costDrivers",
-      "label": "成本来源",
-      "question": "哪些用户行为、第三方服务或模型调用会产生成本？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.usageLimits",
-      "label": "额度与限制",
-      "question": "免费、试用或低权限用户的每日、月度、并发或总量限制是什么？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.abusePrevention",
-      "label": "滥用防护",
-      "question": "如何防止重复请求、并发绕过、越权使用或免费额度被刷？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.monitoringSignals",
-      "label": "监控信号",
-      "question": "需要监控哪些用量、成本、失败率或异常行为信号？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.alertThresholds",
-      "label": "报警阈值",
-      "question": "哪些金额、调用量、错误率或增长速度达到阈值后要报警？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    },
-    {
-      "id": "businessGuardrails.stopLossActions",
-      "label": "止损动作",
-      "question": "触发异常后，应该降级、暂停、关闭哪些能力，谁来处理？",
-      "section": "businessGuardrails",
-      "status": "blocked"
-    }
-  ]
+  "blockers": []
 }

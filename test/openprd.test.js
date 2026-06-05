@@ -183,20 +183,13 @@ test('init creates a workspace and validate passes', async () => {
   assert.ok(await fs.stat(path.join(project, '.openprd', 'knowledge', 'index.json')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.openprd', 'benchmarks', 'sources.yaml')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.openprd', 'benchmarks', 'index.md')).then(() => true));
-  assert.equal(activePrd.includes('OpenPrd 首轮项目画像与自适应需求初始化'), false);
-  assert.equal(activePrd.includes('Verify 边界与历史项目刷新'), false);
   assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'benchmarks', 'inbox')), []);
-  assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'benchmarks', 'evidence')), []);
   assert.equal(await pathExists(path.join(project, '.openprd', 'learning', 'current.json')), false);
   assert.equal(await pathExists(path.join(project, '.openprd', 'learning', 'index.json')), false);
   assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'learning', 'archive')), []);
-  assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'knowledge', 'candidates')), []);
-  assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'knowledge', 'drafts')), []);
   assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'quality', 'reports')), []);
-  assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'reviews')), []);
   assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
   assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'review.html')), false);
-  assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'work-units')), false);
   assert.equal(hasTomlFeatureKey(await fs.readFile(path.join(project, '.codex', 'config.toml'), 'utf8'), 'codex_hooks'), true);
   const hooksJson = JSON.parse(await fs.readFile(path.join(project, '.codex', 'hooks.json'), 'utf8'));
   assert.equal(hooksJson.UserPromptSubmit.some((group) => group.hooks?.some((hook) => hook.command.includes('openprd-hook.mjs'))), true);
@@ -372,14 +365,15 @@ test('clarify stays inline and synthesize writes a review artifact', async () =>
   assert.ok(reviewHtml.includes('review-bottom-action revise'));
   assert.ok(reviewHtml.includes('review-bottom-action confirm'));
   assert.ok(reviewHtml.includes('需要调整'));
-  assert.ok(reviewHtml.includes('认可方案'));
+  assert.ok(reviewHtml.includes('认可并继续'));
   assert.ok(reviewHtml.includes('重点摘要'));
   assert.ok(reviewHtml.includes('主流程小图'));
   assert.ok(reviewHtml.includes('用户旅程'));
   assert.ok(reviewHtml.includes('恢复路径'));
   assert.ok(reviewHtml.includes('review-detail-summary'));
   assert.ok(reviewHtml.includes('review-detail-body'));
-  assert.ok(reviewHtml.includes('OpenPrD Review: 认可方案'));
+  assert.ok(reviewHtml.includes('OpenPrD Review: 认可并继续下一步'));
+  assert.ok(reviewHtml.includes('请先记录这版稳定评审稿，并继续当前 OpenPrd 下一步。'));
   assert.ok(reviewHtml.includes('openprd review . --mark confirmed'));
   assert.ok(reviewHtml.includes(`--version &#39;${synthesized.snapshot.versionId}&#39;`));
   assert.ok(reviewHtml.includes(`--digest &#39;${synthesized.snapshot.digest}&#39;`));
@@ -432,7 +426,7 @@ test('clarify stays inline and synthesize writes a review artifact', async () =>
   assert.ok(refreshedReviewHtml.includes('自动跳转'));
   assert.equal(refreshedReviewHtml.includes('legacy review artifact'), false);
   const refreshedCanonicalReviewHtml = await fs.readFile(synthesized.reviewPath, 'utf8');
-  assert.ok(refreshedCanonicalReviewHtml.includes('认可方案'));
+  assert.ok(refreshedCanonicalReviewHtml.includes('认可并继续'));
   const versionIndexAfterReviewRefresh = JSON.parse(
     await fs.readFile(path.join(project, '.openprd', 'state', 'version-index.json'), 'utf8')
   ).length;

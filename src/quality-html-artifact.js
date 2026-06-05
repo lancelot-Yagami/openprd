@@ -110,9 +110,29 @@ function gateDescription(gate) {
   return descriptions[gate.id] ?? '确认这项测试是否和本次需求相关，证据是否来自本次执行';
 }
 
-function gateTreatment(gate) {
+function featureCoverageLedgerMessage(report) {
+  const tasks = activeTasks(report);
+  const pending = Number(tasks.pending ?? 0);
+  if (pending <= 0) {
+    return null;
+  }
+  const total = Number(tasks.total ?? 0);
+  const done = Number(tasks.done ?? 0);
+  const blocked = Number(tasks.blocked ?? 0);
+  const progress = total > 0 ? `${done}/${total}` : `${done}`;
+  const changeLabel = tasks.activeChange ? `当前变更 ${tasks.activeChange}` : '当前任务账本';
+  return `${changeLabel} 还有 ${pending} 个未完成任务（已完成 ${progress}${blocked > 0 ? `，其中 ${blocked} 个因依赖阻塞` : ''}），这是账本未收口，不等于当前实现失败`;
+}
+
+function gateTreatment(gate, report) {
   if (gate.id === 'feature-coverage' && gate.evidence?.summary === '当前没有激活任务清单') {
     return '全项目检查可继续；具体需求交付时要补任务拆解';
+  }
+  if (gate.id === 'feature-coverage') {
+    const ledgerMessage = featureCoverageLedgerMessage(report);
+    if (ledgerMessage) {
+      return ledgerMessage;
+    }
   }
   if (gate.required && gate.status === 'pass') return '保留证据即可继续';
   if (gate.required) return '现在修复或补证据，完成后重新生成报告';
@@ -175,7 +195,7 @@ function actionItems(report) {
   const failing = required.filter((gate) => !['pass', 'waived'].includes(gate.status));
   const advisory = (report.gates ?? []).filter((gate) => !gate.required && gate.status !== 'pass');
   if (failing.length > 0) {
-    return failing.map((gate) => `${gateDisplay(gate)}：${humanText(gate.warnings?.[0] ?? gate.evidence?.summary ?? '补齐证据后再继续')}`);
+    return failing.map((gate) => `${gateDisplay(gate)}：${humanText(gate.warnings?.[0] ?? gateTreatment(gate, report) ?? gate.evidence?.summary ?? '补齐证据后再继续')}`);
   }
   if (advisory.length > 0) {
     return advisory.map((gate) => `${gateDisplay(gate)}：判断是否属于本期，属于就补测，不属于就说明延期原因`);
@@ -479,10 +499,10 @@ function detailList(items, emptyText) {
   `;
 }
 
-function requiredItems(required) {
+function requiredItems(report, required) {
   return required.map((gate) => ({
     summary: gateSummary(gate),
-    detail: `${gate.required ? '本期必测' : '按风险确认'}，${gate.evidence?.summary ?? '等待补充本次证据'}。${gateTreatment(gate)}`,
+    detail: `${gate.required ? '本期必测' : '按风险确认'}，${gate.evidence?.summary ?? '等待补充本次证据'}。${gateTreatment(gate, report)}`,
   }));
 }
 
@@ -491,7 +511,7 @@ function exceptionItems(report) {
     .filter((gate) => gate.status !== 'pass' && gate.status !== 'waived')
     .map((gate) => ({
       summary: gateSummary(gate),
-      detail: humanText(gate.warnings?.[0] ?? gateTreatment(gate)).replace(/[。.]$/u, ''),
+      detail: humanText(gate.warnings?.[0] ?? gateTreatment(gate, report)).replace(/[。.]$/u, ''),
     }));
 }
 
@@ -525,7 +545,7 @@ function environmentItems(report) {
     },
     {
       summary: '任务覆盖',
-      detail: `已完成 ${evalHarness.featureCoverage.activeTasks.done}/${evalHarness.featureCoverage.activeTasks.total}，待处理 ${evalHarness.featureCoverage.activeTasks.pending}`,
+      detail: `已完成 ${evalHarness.featureCoverage.activeTasks.done}/${evalHarness.featureCoverage.activeTasks.total}，待处理 ${evalHarness.featureCoverage.activeTasks.pending}${evalHarness.featureCoverage.activeTasks.blocked > 0 ? `，阻塞 ${evalHarness.featureCoverage.activeTasks.blocked}` : ''}`,
     },
     {
       summary: '视觉证据',
@@ -652,7 +672,7 @@ function tableRowsForGates(report) {
         <strong>${gate.evidence?.present ? `${gate.evidence.sources.length} 条` : '缺证据'}</strong>
         <span>${escapeHtml(gate.evidence?.summary ?? '未找到本次执行证据')}</span>
       </td>
-      <td>${escapeHtml(gateTreatment(gate))}</td>
+      <td>${escapeHtml(gateTreatment(gate, report))}</td>
     </tr>
   `).join('\n');
 }
@@ -1315,7 +1335,7 @@ export function renderQualityEvalArtifact({ report }) {
       title: '本期必测结果',
       description: '先看必须覆盖的测试是否通过，没通过就不要继续',
       chips: required.map((gate) => chip(gateSummary(gate), toneForGate(gate))),
-      items: requiredItems(required),
+      items: requiredItems(report, required),
       emptyText: '当前没有被判定为本期必测的测试块。',
     }),
     panel({

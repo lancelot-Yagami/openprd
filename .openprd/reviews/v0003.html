@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenPrd 用户视角变化摘要</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --review-bg: #f6f8fb;
+        --review-panel: #ffffff;
+        --review-panel-soft: #f9fafb;
+        --review-text: #172033;
+        --review-muted: #667085;
+        --review-line: #d8dee8;
+        --review-blue: #2563eb;
+        --review-teal: #0f766e;
+        --review-indigo: #4f46e5;
+        --review-amber: #b45309;
+        --review-red: #dc2626;
+        --review-green: #15803d;
+        --review-mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--review-bg);
+        color: var(--review-text);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        overflow-x: hidden;
+      }
+      .review-page {
+        max-width: 1220px;
+        margin: 0 auto;
+        padding: 28px 22px 120px;
+      }
+      .review-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .review-brand {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        border: 1px solid var(--review-line);
+        border-radius: 999px;
+        background: var(--review-panel);
+        color: var(--review-muted);
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .review-project-version {
+        display: grid;
+        gap: 4px;
+        min-width: 220px;
+        margin-left: auto;
+        padding: 12px 16px;
+        border: 1px solid #bfdbfe;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+        box-shadow: 0 12px 24px rgba(37, 99, 235, 0.08);
+      }
+      .review-project-version-label {
+        color: var(--review-blue);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+      .review-project-version-value {
+        color: var(--review-text);
+        font-family: var(--review-mono);
+        font-size: 22px;
+        line-height: 1.1;
+      }
+      .review-project-version-meta {
+        color: var(--review-muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .review-kicker {
+        margin: 0 0 6px;
+        color: var(--review-muted);
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+      .review-overview,
+      .review-map {
+        border: 1px solid var(--review-line);
+        border-radius: 8px;
+        background: var(--review-panel);
+        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+      }
+      .review-overview {
+        display: block;
+        padding: 24px;
+      }
+      .review-overview-copy,
+      .review-panel {
+        min-width: 0;
+      }
+      .review-overview h1,
+      .review-map h2,
+      .review-panel h3 {
+        margin: 0;
+        color: var(--review-text);
+        letter-spacing: 0;
+        overflow-wrap: anywhere;
+      }
+      .review-overview h1 {
+        font-size: 32px;
+        line-height: 1.16;
+        word-break: break-word;
+      }
+      .review-problem {
+        max-width: 760px;
+        margin: 12px 0 0;
+        color: var(--review-muted);
+        font-size: 16px;
+        line-height: 1.75;
+        overflow-wrap: anywhere;
+      }
+      .review-map {
+        margin-top: 18px;
+        padding: 20px;
+      }
+      .review-section-heading,
+      .review-panel-head {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .review-section-heading h2 {
+        font-size: 22px;
+      }
+      .review-icon {
+        flex: 0 0 auto;
+        display: inline-flex;
+        width: 38px;
+        height: 38px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+      }
+      .review-icon svg {
+        width: 22px;
+        height: 22px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .review-icon-map { color: var(--review-indigo); background: #eef2ff; }
+      .review-icon-flow { color: var(--review-teal); background: #ccfbf1; }
+      .review-icon-function { color: var(--review-blue); background: #dbeafe; }
+      .review-icon-guardrail { color: var(--review-amber); background: #fef3c7; }
+      .review-icon-risk { color: var(--review-red); background: #fee2e2; }
+      .review-map-canvas {
+        margin-top: 14px;
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      .review-map-canvas svg {
+        display: block;
+        width: 100%;
+        min-width: 680px;
+        height: auto;
+      }
+      .review-map-bg {
+        fill: #f8fafc;
+        stroke: #e2e8f0;
+      }
+      .review-map-arrow {
+        fill: none;
+        stroke: var(--review-indigo);
+        stroke-width: 3;
+        stroke-linecap: round;
+      }
+      .review-map-link {
+        fill: none;
+        stroke: #a5b4fc;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+      }
+      .review-map-node {
+        fill: #ffffff;
+        stroke: #cbd5e1;
+        stroke-width: 1.5;
+        filter: drop-shadow(0 10px 16px rgba(15, 23, 42, 0.08));
+      }
+      .review-map-center {
+        fill: #eef2ff;
+        stroke: #818cf8;
+        stroke-width: 1.5;
+        filter: drop-shadow(0 14px 18px rgba(79, 70, 229, 0.12));
+      }
+      .review-map-node.node-1 { stroke: #99f6e4; }
+      .review-map-node.node-2 { stroke: #bfdbfe; }
+      .review-map-node.node-3 { stroke: #fde68a; }
+      .review-map-node.node-4 { stroke: #fecaca; }
+      .review-map-step {
+        fill: var(--review-indigo);
+        font-size: 13px;
+        font-weight: 800;
+      }
+      .review-map-tag {
+        fill: var(--review-muted);
+        font-size: 11px;
+        font-weight: 800;
+      }
+      .review-map-tag-pill {
+        fill: #f8fafc;
+        stroke: #cbd5e1;
+        stroke-width: 1;
+      }
+      .review-map-tag-pill.center { fill: #e0e7ff; stroke: #a5b4fc; }
+      .review-map-tag-pill.node-1 { fill: #ccfbf1; stroke: #5eead4; }
+      .review-map-tag-pill.node-2 { fill: #dbeafe; stroke: #93c5fd; }
+      .review-map-tag-pill.node-3 { fill: #fef3c7; stroke: #facc15; }
+      .review-map-tag-pill.node-4 { fill: #fee2e2; stroke: #fca5a5; }
+      .review-map-tag.center { fill: var(--review-indigo); }
+      .review-map-tag.node-1 { fill: #0f766e; }
+      .review-map-tag.node-2 { fill: #2563eb; }
+      .review-map-tag.node-3 { fill: #b45309; }
+      .review-map-tag.node-4 { fill: #dc2626; }
+      .review-map-label {
+        fill: var(--review-text);
+        font-size: 12px;
+        font-weight: 680;
+      }
+      .review-map-note {
+        margin: 10px 0 0;
+        color: var(--review-muted);
+        font-size: 13px;
+      }
+      .review-panel-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .review-panel {
+        min-height: 260px;
+        border: 1px solid var(--review-line);
+        border-radius: 8px;
+        background: var(--review-panel);
+        padding: 18px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+      }
+      .review-panel h3 {
+        font-size: 20px;
+      }
+      .review-panel-head p {
+        margin: 5px 0 0;
+        color: var(--review-muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .review-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 8px;
+        background: var(--review-panel-soft);
+        border: 1px solid var(--review-line);
+      }
+      .review-chip {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        max-width: 100%;
+        min-height: 28px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--review-line);
+        background: #ffffff;
+        color: var(--review-text);
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: keep-all;
+      }
+      .review-panel-flow .review-chip { border-color: #99f6e4; background: #f0fdfa; color: #115e59; }
+      .review-panel-function .review-chip { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+      .review-panel-guardrail .review-chip { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+      .review-panel-risk .review-chip { border-color: #fecaca; background: #fff1f2; color: #991b1b; }
+      .review-chip.empty {
+        color: var(--review-muted);
+        background: #ffffff;
+        border-color: var(--review-line);
+      }
+      .review-journey-map {
+        margin-top: 12px;
+        border: 1px solid var(--review-line);
+        border-radius: 8px;
+        background: #f8fafc;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .review-journey-map svg {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        min-height: 230px;
+      }
+      .review-journey-bg {
+        fill: #fbfdff;
+        stroke: none;
+      }
+      .review-journey-arrow {
+        fill: none;
+        stroke: #0d9488;
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+      .review-journey-arrow.branch {
+        stroke: #94a3b8;
+        stroke-dasharray: 5 6;
+      }
+      .review-journey-node {
+        fill: #ffffff;
+        stroke-width: 1.6;
+        filter: drop-shadow(0 10px 18px rgba(15, 23, 42, 0.08));
+      }
+      .review-journey-node.stage-journey { stroke: #5eead4; }
+      .review-journey-node.stage-step { stroke: #93c5fd; }
+      .review-journey-node.stage-outcome { stroke: #a5b4fc; }
+      .review-journey-node.stage-boundary { stroke: #fde68a; }
+      .review-journey-node.stage-recovery { stroke: #fecaca; }
+      .review-journey-dot {
+        fill: #0f172a;
+      }
+      .review-journey-dot.stage-journey { fill: #0d9488; }
+      .review-journey-dot.stage-step { fill: #2563eb; }
+      .review-journey-dot.stage-outcome { fill: #4f46e5; }
+      .review-journey-dot.stage-boundary { fill: #ca8a04; }
+      .review-journey-dot.stage-recovery { fill: #dc2626; }
+      .review-journey-number {
+        fill: #ffffff;
+        font-size: 11px;
+        font-weight: 850;
+        dominant-baseline: central;
+      }
+      .review-journey-tag {
+        fill: #64748b;
+        font-size: 12px;
+        font-weight: 850;
+      }
+      .review-journey-label {
+        fill: #0f172a;
+        font-size: 12px;
+        font-weight: 760;
+      }
+      .review-panel-list {
+        margin: 16px 0 0;
+        padding-left: 18px;
+        color: var(--review-text);
+        font-size: 15px;
+        line-height: 1.72;
+        overflow-wrap: anywhere;
+      }
+      .review-panel-list li + li {
+        margin-top: 9px;
+      }
+      .review-detail-summary {
+        font-weight: 850;
+        color: var(--review-text);
+      }
+      .review-detail-body {
+        color: var(--review-text);
+      }
+      .review-panel-list .empty {
+        color: var(--review-muted);
+      }
+      .review-bottom-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 30;
+        padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--review-line);
+        background: rgba(246, 248, 251, 0.94);
+        box-shadow: 0 -14px 32px rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(14px);
+      }
+      .review-bottom-bar-inner {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        max-width: 1220px;
+        margin: 0 auto;
+      }
+      .review-bottom-action {
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 152px;
+        min-height: 48px;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        padding: 0 20px;
+        font: inherit;
+        font-size: 16px;
+        font-weight: 850;
+        letter-spacing: 0;
+        line-height: 1;
+        white-space: nowrap;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+        transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      }
+      .review-bottom-action.revise {
+        border-color: #fecaca;
+        background: #fff1f2;
+        color: #b42318;
+      }
+      .review-bottom-action.confirm {
+        border-color: #bbf7d0;
+        background: #ecfdf3;
+        color: #067647;
+      }
+      .review-bottom-action:hover,
+      .review-bottom-action:focus-visible {
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.1);
+        transform: translateY(-1px);
+        outline: none;
+      }
+      .review-bottom-action.revise:hover,
+      .review-bottom-action.revise:focus-visible {
+        border-color: #fda4af;
+        background: #ffe4e6;
+      }
+      .review-bottom-action.confirm:hover,
+      .review-bottom-action.confirm:focus-visible {
+        border-color: #86efac;
+        background: #dcfce7;
+      }
+      .review-bottom-action:active {
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+        transform: translateY(0);
+      }
+      @media (max-width: 860px) {
+        .review-overview {
+          grid-template-columns: 1fr;
+        }
+        .review-panel-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 620px) {
+        .review-page { padding: 18px 12px 128px; }
+        .review-topbar { align-items: flex-start; flex-direction: column; }
+        .review-project-version {
+          min-width: 0;
+          width: 100%;
+          margin-left: 0;
+        }
+        .review-overview { padding: 18px; }
+        .review-overview h1 {
+          font-size: 26px;
+          word-break: break-all;
+        }
+        .review-problem { word-break: break-all; }
+        .review-map-canvas svg { min-width: 0; }
+        .review-journey-map svg { min-width: 620px; }
+        .review-section-heading h2 { font-size: 20px; }
+        .review-bottom-bar { padding-inline: 12px; }
+        .review-bottom-bar-inner {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .review-bottom-action {
+          justify-content: center;
+          padding-inline: 10px;
+          font-size: 15px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="review-page">
+      <header class="review-topbar">
+        <div class="review-brand">OpenPrd / 评审面板</div>
+        
+        <div class="review-project-version" aria-label="项目版本">
+          <span class="review-project-version-label">项目版本</span>
+          <strong class="review-project-version-value">0.1.2</strong>
+          <span class="review-project-version-meta">当前版本 · 6 条变化</span>
+        </div>
+  
+      </header>
+      
+    <section class="review-overview" aria-labelledby="reviewOverviewTitle">
+      <div class="review-overview-copy">
+        <p class="review-kicker">需求概览</p>
+        <h1 id="reviewOverviewTitle">OpenPrd 用户视角变化摘要</h1>
+        <p class="review-problem">OpenPrd 现在已经有内部 PRD 版本和用户视角变化摘要，但还没有一个可选的项目级 release/version 轨道来维护当前版本号、版本内更新项，以及与 commit tag 的协同规则。结果是版本号已经在项目里被真实使用，却缺少一个本地真源来累计本版本的需求、Bug、handoff 摘要和最终发布说明。</p>
+      </div>
+    </section>
+  
+      
+    <section class="review-map" aria-labelledby="reviewMapTitle">
+      <div class="review-section-heading">
+        <span class="review-icon review-icon-map" aria-hidden="true"><svg viewBox="0 0 24 24" role="img" aria-label="图谱"><path d="M12 5v14" /><path d="M5 8h14" /><path d="M7 16h10" /><circle cx="12" cy="5" r="2" /><circle cx="5" cy="8" r="2" /><circle cx="19" cy="8" r="2" /><circle cx="7" cy="16" r="2" /><circle cx="17" cy="16" r="2" /></svg></span>
+        <div>
+          <h2 id="reviewMapTitle">需求关系图</h2>
+        </div>
+      </div>
+      <div class="review-map-canvas">
+        <svg viewBox="0 0 960 336" role="img" aria-label="需求关系图" preserveAspectRatio="xMidYMid meet">
+          <rect class="review-map-bg" x="2" y="2" width="956" height="332" rx="8" />
+          <path class="review-map-link" d="M 480 168 L 250 94" /><path class="review-map-link" d="M 480 168 L 710 94" /><path class="review-map-link" d="M 480 168 L 250 242" /><path class="review-map-link" d="M 480 168 L 710 242" />
+          
+    <g>
+      <rect class="review-map-node node-1" x="128" y="51" width="244" height="86" rx="8" />
+      
+    <rect class="review-map-tag-pill node-1" x="209" y="59" width="82" height="26" rx="13" />
+    <text class="review-map-tag node-1" x="250" y="76" text-anchor="middle">版本轨道</text>
+  
+      <text class="review-map-label" x="156" y="100" text-anchor="start"><tspan x="156" dy="0">统一版本号、变化条目和tag</tspan></text>
+    </g>
+  
+    <g>
+      <rect class="review-map-node node-2" x="588" y="51" width="244" height="86" rx="8" />
+      
+    <rect class="review-map-tag-pill node-2" x="669" y="59" width="82" height="26" rx="13" />
+    <text class="review-map-tag node-2" x="710" y="76" text-anchor="middle">四处落点</text>
+  
+      <text class="review-map-label" x="616" y="100" text-anchor="start"><tspan x="616" dy="0">ledger、commit、handoff、</tspan><tspan x="616" dy="14">同步</tspan></text>
+    </g>
+  
+    <g>
+      <rect class="review-map-node node-3" x="128" y="199" width="244" height="86" rx="8" />
+      
+    <rect class="review-map-tag-pill node-3" x="216" y="207" width="68" height="26" rx="13" />
+    <text class="review-map-tag node-3" x="250" y="224" text-anchor="middle">主流程</text>
+  
+      <text class="review-map-label" x="156" y="248" text-anchor="start"><tspan x="156" dy="0">版本累计变化，commit可挂tag</tspan></text>
+    </g>
+  
+    <g>
+      <rect class="review-map-node node-4" x="588" y="199" width="244" height="86" rx="8" />
+      
+    <rect class="review-map-tag-pill node-4" x="669" y="207" width="82" height="26" rx="13" />
+    <text class="review-map-tag node-4" x="710" y="224" text-anchor="middle">主要风险</text>
+  
+      <text class="review-map-label" x="616" y="248" text-anchor="start"><tspan x="616" dy="0">远端tag覆盖和版本混用</tspan></text>
+    </g>
+  
+          
+    <g class="review-map-center-group">
+      <rect class="review-map-center" x="330" y="124" width="300" height="88" rx="8" />
+      
+    <rect class="review-map-tag-pill center" x="439" y="133" width="82" height="26" rx="13" />
+    <text class="review-map-tag center" x="480" y="150" text-anchor="middle">问题定义</text>
+  
+      <text class="review-map-label center" x="360" y="176" text-anchor="start"><tspan x="360" dy="0">缺少项目级版本真源与tag协同</tspan></text>
+    </g>
+  
+        </svg>
+      </div>
+    </section>
+  
+      <section class="review-panel-grid" aria-label="固定评审项">
+        
+    <section class="review-panel review-panel-flow">
+      <header class="review-panel-head">
+        <span class="review-icon review-icon-flow" aria-hidden="true"><svg viewBox="0 0 24 24" role="img" aria-label="流程"><path d="M5 6.5h6.4a3.6 3.6 0 0 1 3.6 3.6v.8" /><path d="M15 17.5H8.6A3.6 3.6 0 0 1 5 13.9v-.8" /><path d="m12 8.5 3-3 3 3" /><path d="m8 15.5-3 3-3-3" /></svg></span>
+        <div>
+          <h3>主流程与边界情况</h3>
+          <p>确认用户旅程、关键步骤和恢复路径是否已经讲清楚，能否进入实现前确认</p>
+        </div>
+      </header>
+      <div class="review-chip-row" aria-label="主流程与边界情况重点摘要">
+        <span class="review-chip">新增轨道</span><span class="review-chip">关联提交</span><span class="review-chip">导出说明</span>
+      </div>
+      
+    <div class="review-journey-map" aria-label="主流程小图">
+      <svg viewBox="0 0 680 320" role="img" aria-label="用户旅程、关键步骤、边界情况和恢复路径" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="reviewJourneyArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#0d9488" />
+          </marker>
+        </defs>
+        <rect class="review-journey-bg" x="2" y="2" width="676" height="316" rx="8" />
+        <path class="review-journey-arrow" d="M 202 88 H 248" marker-end="url(#reviewJourneyArrow)" />
+        <path class="review-journey-arrow" d="M 432 88 H 478" marker-end="url(#reviewJourneyArrow)" />
+        <path class="review-journey-arrow branch" d="M 340 134 V 164 H 236 V 190" marker-end="url(#reviewJourneyArrow)" />
+        <path class="review-journey-arrow branch" d="M 340 134 V 164 H 454 V 190" marker-end="url(#reviewJourneyArrow)" />
+        <g>
+          <rect class="review-journey-node stage-journey" x="26" y="40" width="176" height="96" rx="8" />
+          <circle class="review-journey-dot stage-journey" cx="56" cy="64" r="12" />
+          <text class="review-journey-number" x="56" y="64" text-anchor="middle">1</text>
+          <text class="review-journey-tag" x="114" y="66" text-anchor="middle">用户旅程</text>
+          <text class="review-journey-label" x="114" y="92" text-anchor="middle"><tspan x="114" dy="0">重点说明</tspan></text>
+        </g>
+        <g>
+          <rect class="review-journey-node stage-step" x="252" y="40" width="176" height="96" rx="8" />
+          <circle class="review-journey-dot stage-step" cx="282" cy="64" r="12" />
+          <text class="review-journey-number" x="282" y="64" text-anchor="middle">2</text>
+          <text class="review-journey-tag" x="340" y="66" text-anchor="middle">关键步骤</text>
+          <text class="review-journey-label" x="340" y="92" text-anchor="middle"><tspan x="340" dy="0">重点说明</tspan></text>
+        </g>
+        <g>
+          <rect class="review-journey-node stage-outcome" x="478" y="40" width="176" height="96" rx="8" />
+          <circle class="review-journey-dot stage-outcome" cx="508" cy="64" r="12" />
+          <text class="review-journey-number" x="508" y="64" text-anchor="middle">3</text>
+          <text class="review-journey-tag" x="566" y="66" text-anchor="middle">结果确认</text>
+          <text class="review-journey-label" x="566" y="92" text-anchor="middle"><tspan x="566" dy="0">重点说明</tspan></text>
+        </g>
+        <g>
+          <rect class="review-journey-node stage-boundary" x="126" y="194" width="220" height="88" rx="8" />
+          <circle class="review-journey-dot stage-boundary" cx="158" cy="218" r="12" />
+          <text class="review-journey-number" x="158" y="218" text-anchor="middle">B</text>
+          <text class="review-journey-tag" x="236" y="220" text-anchor="middle">边界情况</text>
+          <text class="review-journey-label" x="236" y="246" text-anchor="middle"><tspan x="236" dy="0">项目可能已经有自己的一套版本号</tspan><tspan x="236" dy="13">规则</tspan></text>
+        </g>
+        <g>
+          <rect class="review-journey-node stage-recovery" x="356" y="194" width="220" height="88" rx="8" />
+          <circle class="review-journey-dot stage-recovery" cx="388" cy="218" r="12" />
+          <text class="review-journey-number" x="388" y="218" text-anchor="middle">R</text>
+          <text class="review-journey-tag" x="466" y="220" text-anchor="middle">恢复路径</text>
+          <text class="review-journey-label" x="466" y="246" text-anchor="middle"><tspan x="466" dy="0">commit</tspan></text>
+        </g>
+      </svg>
+    </div>
+  
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">新增轨道</strong><span class="review-detail-body">：项目可记录当前版本，并累计该版本内的需求、Bug和摘要。</span></li><li><strong class="review-detail-summary">关联提交</strong><span class="review-detail-body">：启用版本轨道后，commit 可读取当前版本并辅助挂本地 tag。</span></li><li><strong class="review-detail-summary">导出说明</strong><span class="review-detail-body">：handoff、版本说明和外部同步都可复用同一版本条目。</span></li></ul>
+    </section>
+  
+
+    <section class="review-panel review-panel-function">
+      <header class="review-panel-head">
+        <span class="review-icon review-icon-function" aria-hidden="true"><svg viewBox="0 0 24 24" role="img" aria-label="功能"><path d="M5 7h14" /><path d="M5 12h14" /><path d="M5 17h14" /><circle cx="8" cy="7" r="2" /><circle cx="16" cy="12" r="2" /><circle cx="11" cy="17" r="2" /></svg></span>
+        <div>
+          <h3>功能与约束</h3>
+          <p>区分必须交付、非功能要求和当前依赖假设</p>
+        </div>
+      </header>
+      <div class="review-chip-row" aria-label="功能与约束重点摘要">
+        <span class="review-chip">保留短文案</span><span class="review-chip">手动修正版</span><span class="review-chip">同版续提</span>
+      </div>
+      
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">保留短文案</strong><span class="review-detail-body">：新增、修复、优化、调整、移除继续作为版本条目的默认动作词。</span></li><li><strong class="review-detail-summary">手动修正版</strong><span class="review-detail-body">：用户可以随时把当前版本从 0.1.23 调整到下一个版本。</span></li><li><strong class="review-detail-summary">同版续提</strong><span class="review-detail-body">：未切新版本时，后续提交继续累计到当前版本。</span></li></ul>
+    </section>
+  
+
+    <section class="review-panel review-panel-guardrail">
+      <header class="review-panel-head">
+        <span class="review-icon review-icon-guardrail" aria-hidden="true"><svg viewBox="0 0 24 24" role="img" aria-label="护栏"><path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 9.8 4.2-1.4 7-5.4 7-9.8V6l-7-3Z" /><path d="M9 12.2 11 14l4-4.4" /></svg></span>
+        <div>
+          <h3>业务成本与滥用护栏</h3>
+          <p>涉及免费额度、消耗型成本或第三方调用时，先确认限制、报警和止损动作</p>
+        </div>
+      </header>
+      <div class="review-chip-row" aria-label="业务成本与滥用护栏重点摘要">
+        <span class="review-chip">分层版本</span><span class="review-chip">不强推送</span><span class="review-chip">可分开启用</span>
+      </div>
+      
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">分层版本</strong><span class="review-detail-body">：内部 PRD 版本 v000x 不直接等于项目发版号。</span></li><li><strong class="review-detail-summary">不强推送</strong><span class="review-detail-body">：不默认自动 push、发布或 force 更新远端 tag。</span></li><li><strong class="review-detail-summary">可分开启用</strong><span class="review-detail-body">：只想维护版本说明的项目可以不开 tag 辅助。</span></li></ul>
+    </section>
+  
+
+    <section class="review-panel review-panel-risk">
+      <header class="review-panel-head">
+        <span class="review-icon review-icon-risk" aria-hidden="true"><svg viewBox="0 0 24 24" role="img" aria-label="风险"><path d="M12 4 3.5 19h17L12 4Z" /><path d="M12 9v4" /><path d="M12 16.5h.01" /></svg></span>
+        <div>
+          <h3>开放问题与风险</h3>
+          <p>需求定稿前还没关掉的问题要留在这里，不要默默假定解决</p>
+        </div>
+      </header>
+      <div class="review-chip-row" aria-label="开放问题与风险重点摘要">
+        <span class="review-chip">远端冲突</span><span class="review-chip">版本混用</span><span class="review-chip">事实失真</span>
+      </div>
+      
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">远端冲突</strong><span class="review-detail-body">：同名 tag 已推到远端时，继续移动会变成高风险操作。</span></li><li><strong class="review-detail-summary">版本混用</strong><span class="review-detail-body">：若把 PRD 版本当发版号，会让 review 和 release 都变乱。</span></li><li><strong class="review-detail-summary">事实失真</strong><span class="review-detail-body">：变化条目归错版本，会让 handoff 和外部同步失真。</span></li></ul>
+    </section>
+  
+      </section>
+      
+    <nav class="review-bottom-bar" aria-label="评审决定">
+      <div class="review-bottom-bar-inner">
+        <button type="button" class="review-bottom-action revise" data-copy-value="OpenPrD Review: 需要调整
+
+命令:
+
+openprd review . --mark needs-revision --version &#39;v0003&#39; --digest &#39;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&#39; --work-unit &#39;wu-20260602122244-78656aaf&#39; --notes &#39;说明需要调整的点&#39;
+
+上下文:
+
+{
+  &quot;versionId&quot;: &quot;v0003&quot;,
+  &quot;title&quot;: &quot;OpenPrd 用户视角变化摘要&quot;,
+  &quot;digest&quot;: &quot;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&quot;,
+  &quot;workUnitId&quot;: &quot;wu-20260602122244-78656aaf&quot;,
+  &quot;targetRoot&quot;: &quot;/Users/chaojifeng/Projects/harness-engineer/openprd&quot;,
+  &quot;reviewStatus&quot;: &quot;pending-confirmation&quot;,
+  &quot;recommendedActions&quot;: [
+    &quot;确认问题与目标&quot;,
+    &quot;确认范围内 / 范围外&quot;,
+    &quot;确认主流程与失败路径&quot;,
+    &quot;确认关键风险与开放问题&quot;
+  ],
+  &quot;summaryStyle&quot;: {
+    &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+    &quot;preferredVerbs&quot;: [
+      &quot;新增&quot;,
+      &quot;修复&quot;,
+      &quot;优化&quot;,
+      &quot;调整&quot;,
+      &quot;移除&quot;
+    ],
+    &quot;panelExamples&quot;: {
+      &quot;flow&quot;: {
+        &quot;summary&quot;: &quot;新增入口&quot;,
+        &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+      },
+      &quot;function&quot;: {
+        &quot;summary&quot;: &quot;优化说明&quot;,
+        &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+      },
+      &quot;guardrail&quot;: {
+        &quot;summary&quot;: &quot;调整边界&quot;,
+        &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+      },
+      &quot;risk&quot;: {
+        &quot;summary&quot;: &quot;修复误判&quot;,
+        &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+      }
+    }
+  },
+  &quot;sectionKeys&quot;: [
+    &quot;meta&quot;,
+    &quot;problem&quot;,
+    &quot;users&quot;,
+    &quot;goals&quot;,
+    &quot;scope&quot;,
+    &quot;scenarios&quot;,
+    &quot;requirements&quot;,
+    &quot;businessGuardrails&quot;,
+    &quot;constraints&quot;,
+    &quot;risks&quot;,
+    &quot;handoff&quot;,
+    &quot;typeSpecific&quot;
+  ],
+  &quot;presentationContract&quot;: {
+    &quot;intent&quot;: &quot;这些限制用于反馈给 Agent 重新概括，不由 HTML 模板截断原文。&quot;,
+    &quot;summaryStyle&quot;: {
+      &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+      &quot;preferredVerbs&quot;: [
+        &quot;新增&quot;,
+        &quot;修复&quot;,
+        &quot;优化&quot;,
+        &quot;调整&quot;,
+        &quot;移除&quot;
+      ],
+      &quot;panelExamples&quot;: {
+        &quot;flow&quot;: {
+          &quot;summary&quot;: &quot;新增入口&quot;,
+          &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+        },
+        &quot;function&quot;: {
+          &quot;summary&quot;: &quot;优化说明&quot;,
+          &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+        },
+        &quot;guardrail&quot;: {
+          &quot;summary&quot;: &quot;调整边界&quot;,
+          &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+        },
+        &quot;risk&quot;: {
+          &quot;summary&quot;: &quot;修复误判&quot;,
+          &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+        }
+      }
+    },
+    &quot;expectedDataShape&quot;: {
+      &quot;reviewPresentation&quot;: {
+        &quot;diagram&quot;: {
+          &quot;type&quot;: &quot;map&quot;,
+          &quot;note&quot;: &quot;默认用关系图；只有确认为线性流程时改为 flow，并用 flowEdges 明确哪些节点有箭头。&quot;
+        },
+        &quot;mapNodes&quot;: {
+          &quot;problem&quot;: {
+            &quot;title&quot;: &quot;问题定义&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;goal&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;scope&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;flow&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;risk&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          }
+        },
+        &quot;flowNodes&quot;: [
+          {
+            &quot;id&quot;: &quot;step1&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step2&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step3&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          }
+        ],
+        &quot;flowEdges&quot;: [
+          {
+            &quot;from&quot;: &quot;step1&quot;,
+            &quot;to&quot;: &quot;step2&quot;
+          },
+          {
+            &quot;from&quot;: &quot;step2&quot;,
+            &quot;to&quot;: &quot;step3&quot;
+          }
+        ],
+        &quot;panels&quot;: {
+          &quot;flow&quot;: [
+            {
+              &quot;summary&quot;: &quot;新增入口&quot;,
+              &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+            }
+          ],
+          &quot;function&quot;: [
+            {
+              &quot;summary&quot;: &quot;优化说明&quot;,
+              &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+            }
+          ],
+          &quot;guardrail&quot;: [
+            {
+              &quot;summary&quot;: &quot;调整边界&quot;,
+              &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+            }
+          ],
+          &quot;risk&quot;: [
+            {
+              &quot;summary&quot;: &quot;修复误判&quot;,
+              &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+            }
+          ]
+        }
+      }
+    },
+    &quot;rules&quot;: [
+      {
+        &quot;id&quot;: &quot;review-map-card-text&quot;,
+        &quot;area&quot;: &quot;需求关系图 / 需求流程图&quot;,
+        &quot;target&quot;: &quot;图中每个卡片的正文&quot;,
+        &quot;maxChars&quot;: 30,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.mapNodes.*.text 或 reviewPresentation.flowNodes[].text，重写成用户一眼能扫懂的短句，不要靠省略号或截断。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-map-card-title&quot;,
+        &quot;area&quot;: &quot;需求关系图 / 需求流程图&quot;,
+        &quot;target&quot;: &quot;图中卡片标题胶囊&quot;,
+        &quot;maxChars&quot;: 15,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.mapNodes.*.title，重写成短标题，优先使用业务词，不使用内部技术词。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-highlight-chip&quot;,
+        &quot;area&quot;: &quot;四个评审卡片&quot;,
+        &quot;target&quot;: &quot;重点摘要胶囊&quot;,
+        &quot;maxChars&quot;: 15,
+        &quot;action&quot;: &quot;请重写成短标签，优先使用 新增 / 修复 / 优化 / 调整 / 移除 这类用户能一眼看懂的动作词，再补必要对象。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-panel-detail-format&quot;,
+        &quot;area&quot;: &quot;四个评审卡片&quot;,
+        &quot;target&quot;: &quot;明细分点&quot;,
+        &quot;format&quot;: &quot;- **摘要内容**：明细一句话&quot;,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.panels.&lt;kind&gt;[]，把每个明细改写为“加粗短摘要 + 一句话说明”，短摘要优先使用 新增 / 修复 / 优化 / 调整 / 移除。&quot;
+      }
+    ]
+  },
+  &quot;presentationFeedback&quot;: [],
+  &quot;exportedAt&quot;: &quot;2026-06-05T00:44:22.422Z&quot;
+}" title="openprd review . --mark needs-revision --version &#39;v0003&#39; --digest &#39;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&#39; --work-unit &#39;wu-20260602122244-78656aaf&#39; --notes &#39;说明需要调整的点&#39;">
+          需要调整
+        </button>
+        <button type="button" class="review-bottom-action confirm" data-copy-value="OpenPrD Review: 认可并继续下一步
+
+当前稳定评审稿 v0003已确认。请先记录这版稳定评审稿，并继续当前 OpenPrd 下一步。若 review 后 tasks 已就绪但还需要执行授权，请直接展示执行确认清单，不要再泛泛确认。
+
+命令:
+
+openprd review . --mark confirmed --version &#39;v0003&#39; --digest &#39;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&#39; --work-unit &#39;wu-20260602122244-78656aaf&#39;
+
+上下文:
+
+{
+  &quot;versionId&quot;: &quot;v0003&quot;,
+  &quot;title&quot;: &quot;OpenPrd 用户视角变化摘要&quot;,
+  &quot;digest&quot;: &quot;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&quot;,
+  &quot;workUnitId&quot;: &quot;wu-20260602122244-78656aaf&quot;,
+  &quot;targetRoot&quot;: &quot;/Users/chaojifeng/Projects/harness-engineer/openprd&quot;,
+  &quot;reviewStatus&quot;: &quot;pending-confirmation&quot;,
+  &quot;recommendedActions&quot;: [
+    &quot;确认问题与目标&quot;,
+    &quot;确认范围内 / 范围外&quot;,
+    &quot;确认主流程与失败路径&quot;,
+    &quot;确认关键风险与开放问题&quot;
+  ],
+  &quot;summaryStyle&quot;: {
+    &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+    &quot;preferredVerbs&quot;: [
+      &quot;新增&quot;,
+      &quot;修复&quot;,
+      &quot;优化&quot;,
+      &quot;调整&quot;,
+      &quot;移除&quot;
+    ],
+    &quot;panelExamples&quot;: {
+      &quot;flow&quot;: {
+        &quot;summary&quot;: &quot;新增入口&quot;,
+        &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+      },
+      &quot;function&quot;: {
+        &quot;summary&quot;: &quot;优化说明&quot;,
+        &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+      },
+      &quot;guardrail&quot;: {
+        &quot;summary&quot;: &quot;调整边界&quot;,
+        &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+      },
+      &quot;risk&quot;: {
+        &quot;summary&quot;: &quot;修复误判&quot;,
+        &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+      }
+    }
+  },
+  &quot;sectionKeys&quot;: [
+    &quot;meta&quot;,
+    &quot;problem&quot;,
+    &quot;users&quot;,
+    &quot;goals&quot;,
+    &quot;scope&quot;,
+    &quot;scenarios&quot;,
+    &quot;requirements&quot;,
+    &quot;businessGuardrails&quot;,
+    &quot;constraints&quot;,
+    &quot;risks&quot;,
+    &quot;handoff&quot;,
+    &quot;typeSpecific&quot;
+  ],
+  &quot;presentationContract&quot;: {
+    &quot;intent&quot;: &quot;这些限制用于反馈给 Agent 重新概括，不由 HTML 模板截断原文。&quot;,
+    &quot;summaryStyle&quot;: {
+      &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+      &quot;preferredVerbs&quot;: [
+        &quot;新增&quot;,
+        &quot;修复&quot;,
+        &quot;优化&quot;,
+        &quot;调整&quot;,
+        &quot;移除&quot;
+      ],
+      &quot;panelExamples&quot;: {
+        &quot;flow&quot;: {
+          &quot;summary&quot;: &quot;新增入口&quot;,
+          &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+        },
+        &quot;function&quot;: {
+          &quot;summary&quot;: &quot;优化说明&quot;,
+          &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+        },
+        &quot;guardrail&quot;: {
+          &quot;summary&quot;: &quot;调整边界&quot;,
+          &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+        },
+        &quot;risk&quot;: {
+          &quot;summary&quot;: &quot;修复误判&quot;,
+          &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+        }
+      }
+    },
+    &quot;expectedDataShape&quot;: {
+      &quot;reviewPresentation&quot;: {
+        &quot;diagram&quot;: {
+          &quot;type&quot;: &quot;map&quot;,
+          &quot;note&quot;: &quot;默认用关系图；只有确认为线性流程时改为 flow，并用 flowEdges 明确哪些节点有箭头。&quot;
+        },
+        &quot;mapNodes&quot;: {
+          &quot;problem&quot;: {
+            &quot;title&quot;: &quot;问题定义&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;goal&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;scope&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;flow&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          },
+          &quot;risk&quot;: {
+            &quot;title&quot;: &quot;15 字以内标题&quot;,
+            &quot;text&quot;: &quot;30 字以内的图中正文&quot;
+          }
+        },
+        &quot;flowNodes&quot;: [
+          {
+            &quot;id&quot;: &quot;step1&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step2&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step3&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          }
+        ],
+        &quot;flowEdges&quot;: [
+          {
+            &quot;from&quot;: &quot;step1&quot;,
+            &quot;to&quot;: &quot;step2&quot;
+          },
+          {
+            &quot;from&quot;: &quot;step2&quot;,
+            &quot;to&quot;: &quot;step3&quot;
+          }
+        ],
+        &quot;panels&quot;: {
+          &quot;flow&quot;: [
+            {
+              &quot;summary&quot;: &quot;新增入口&quot;,
+              &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+            }
+          ],
+          &quot;function&quot;: [
+            {
+              &quot;summary&quot;: &quot;优化说明&quot;,
+              &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+            }
+          ],
+          &quot;guardrail&quot;: [
+            {
+              &quot;summary&quot;: &quot;调整边界&quot;,
+              &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+            }
+          ],
+          &quot;risk&quot;: [
+            {
+              &quot;summary&quot;: &quot;修复误判&quot;,
+              &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+            }
+          ]
+        }
+      }
+    },
+    &quot;rules&quot;: [
+      {
+        &quot;id&quot;: &quot;review-map-card-text&quot;,
+        &quot;area&quot;: &quot;需求关系图 / 需求流程图&quot;,
+        &quot;target&quot;: &quot;图中每个卡片的正文&quot;,
+        &quot;maxChars&quot;: 30,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.mapNodes.*.text 或 reviewPresentation.flowNodes[].text，重写成用户一眼能扫懂的短句，不要靠省略号或截断。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-map-card-title&quot;,
+        &quot;area&quot;: &quot;需求关系图 / 需求流程图&quot;,
+        &quot;target&quot;: &quot;图中卡片标题胶囊&quot;,
+        &quot;maxChars&quot;: 15,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.mapNodes.*.title，重写成短标题，优先使用业务词，不使用内部技术词。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-highlight-chip&quot;,
+        &quot;area&quot;: &quot;四个评审卡片&quot;,
+        &quot;target&quot;: &quot;重点摘要胶囊&quot;,
+        &quot;maxChars&quot;: 15,
+        &quot;action&quot;: &quot;请重写成短标签，优先使用 新增 / 修复 / 优化 / 调整 / 移除 这类用户能一眼看懂的动作词，再补必要对象。&quot;
+      },
+      {
+        &quot;id&quot;: &quot;review-panel-detail-format&quot;,
+        &quot;area&quot;: &quot;四个评审卡片&quot;,
+        &quot;target&quot;: &quot;明细分点&quot;,
+        &quot;format&quot;: &quot;- **摘要内容**：明细一句话&quot;,
+        &quot;action&quot;: &quot;请写入 reviewPresentation.panels.&lt;kind&gt;[]，把每个明细改写为“加粗短摘要 + 一句话说明”，短摘要优先使用 新增 / 修复 / 优化 / 调整 / 移除。&quot;
+      }
+    ]
+  },
+  &quot;presentationFeedback&quot;: [],
+  &quot;exportedAt&quot;: &quot;2026-06-05T00:44:22.422Z&quot;
+}" title="openprd review . --mark confirmed --version &#39;v0003&#39; --digest &#39;f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918&#39; --work-unit &#39;wu-20260602122244-78656aaf&#39;">
+          认可并继续
+        </button>
+      </div>
+    </nav>
+  
+      <script>
+        async function copyReviewText(text) {
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch (error) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+          }
+        }
+        function flashCopied(button) {
+          const old = button.innerHTML;
+          button.textContent = '已复制';
+          setTimeout(() => { button.innerHTML = old; }, 1200);
+        }
+        document.querySelectorAll('[data-copy-value]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            await copyReviewText(button.dataset.copyValue || '');
+            flashCopied(button);
+          });
+        });
+      </script>
+    </main>
+  </body>
+</html>

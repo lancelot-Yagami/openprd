@@ -33,12 +33,58 @@ export function formatCommand(command, args = []) {
   return [command, ...args].map(shellQuote).join(' ');
 }
 
+function windowsShellQuote(value) {
+  const text = String(value);
+  if (!text) {
+    return '""';
+  }
+  if (!/[\s"&<>|^]/.test(text)) {
+    return text;
+  }
+  return `"${text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
+}
+
+function formatWindowsCommand(command, args = []) {
+  return [command, ...args].map(windowsShellQuote).join(' ');
+}
+
+function hasExplicitPath(command) {
+  return /[\\/]/.test(command) || /^[A-Za-z]:/.test(command);
+}
+
+export function buildProcessInvocation(command, args = [], options = {}) {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const useWindowsShellWrapper = (
+    platform === 'win32'
+    && options.shell === undefined
+    && !hasExplicitPath(command)
+  );
+
+  if (useWindowsShellWrapper) {
+    return {
+      command: env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', formatWindowsCommand(command, args)],
+      display: formatCommand(command, args),
+      shell: false,
+    };
+  }
+
+  return {
+    command,
+    args,
+    display: formatCommand(command, args),
+    shell: Boolean(options.shell),
+  };
+}
+
 function runProcess(command, args = [], options = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const invocation = buildProcessInvocation(command, args, options);
+    const child = spawn(invocation.command, invocation.args, {
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? process.env,
-      shell: Boolean(options.shell),
+      shell: invocation.shell,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -54,7 +100,7 @@ function runProcess(command, args = [], options = {}) {
         ok: false,
         command,
         args,
-        display: formatCommand(command, args),
+        display: invocation.display,
         exitCode: null,
         stdout,
         stderr,
@@ -66,7 +112,7 @@ function runProcess(command, args = [], options = {}) {
         ok: exitCode === 0,
         command,
         args,
-        display: formatCommand(command, args),
+        display: invocation.display,
         exitCode,
         stdout,
         stderr,

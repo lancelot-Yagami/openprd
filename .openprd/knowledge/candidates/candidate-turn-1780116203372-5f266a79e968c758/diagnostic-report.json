@@ -1,0 +1,129 @@
+{
+  "id": "candidate-turn-1780116203372-5f266a79e968c758",
+  "knowledgeCandidateId": "candidate-turn-1780116203372-5f266a79e968c758",
+  "title": "本轮项目回顾",
+  "status": "pass",
+  "summary": {
+    "title": "本轮项目回顾",
+    "status": "pass",
+    "message": "本轮围绕 13 个可沉淀文件生成回顾。 本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。 已记录 2 条回顾信号。"
+  },
+  "problem": "本轮围绕 13 个可沉淀文件生成回顾。 本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。 已记录 2 条回顾信号。",
+  "message": "本轮围绕 13 个可沉淀文件生成回顾。 本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。 已记录 2 条回顾信号。",
+  "touchedFiles": [
+    "src/workspace-core.js",
+    "src/openprd.js",
+    "src/fleet.js",
+    "src/standards.js",
+    "test/helpers/openprd-test-helpers.js",
+    "test/openprd-run-fleet.test.js",
+    "test/openprd-quality-standards.test.js",
+    "test/openprd-agent-integration.test.js",
+    "test/openprd-benchmark-knowledge.test.js",
+    "test/openprd.test.js",
+    "test/openprd-workspace-flow.test.js",
+    "test/openprd-discovery-changes.test.js",
+    "test/openprd-github-release.test.js"
+  ],
+  "reviewSignals": [
+    {
+      "id": "run-verify",
+      "kind": "run-verify",
+      "at": "2026-06-05 09:05:29",
+      "ok": true,
+      "productionReady": true,
+      "attentionGates": [],
+      "summary": "run verify passed",
+      "touchedFiles": []
+    },
+    {
+      "id": "dev-check",
+      "kind": "dev-check",
+      "at": "2026-06-05 09:04:20",
+      "ok": true,
+      "productionReady": null,
+      "attentionGates": [],
+      "summary": "dev-check attention=9, warning=1",
+      "touchedFiles": [
+        "src/workspace-core.js",
+        "src/openprd.js",
+        "src/fleet.js",
+        "src/standards.js",
+        "test/helpers/openprd-test-helpers.js",
+        "test/openprd-run-fleet.test.js",
+        "test/openprd-quality-standards.test.js",
+        "test/openprd-agent-integration.test.js",
+        "test/openprd-benchmark-knowledge.test.js",
+        "test/openprd.test.js",
+        "test/openprd-workspace-flow.test.js",
+        "test/openprd-discovery-changes.test.js",
+        "test/openprd-github-release.test.js"
+      ]
+    }
+  ],
+  "runtimeEvents": [
+    {
+      "eventName": "run-verify",
+      "status": "pass",
+      "message": "run verify passed",
+      "touchedFiles": [],
+      "at": "2026-06-05 09:05:29"
+    },
+    {
+      "eventName": "dev-check",
+      "status": "pass",
+      "message": "dev-check attention=9, warning=1",
+      "touchedFiles": [
+        "src/workspace-core.js",
+        "src/openprd.js",
+        "src/fleet.js",
+        "src/standards.js",
+        "test/helpers/openprd-test-helpers.js",
+        "test/openprd-run-fleet.test.js",
+        "test/openprd-quality-standards.test.js",
+        "test/openprd-agent-integration.test.js",
+        "test/openprd-benchmark-knowledge.test.js",
+        "test/openprd.test.js",
+        "test/openprd-workspace-flow.test.js",
+        "test/openprd-discovery-changes.test.js",
+        "test/openprd-github-release.test.js"
+      ],
+      "at": "2026-06-05 09:04:20"
+    }
+  ],
+  "timeline": [
+    {
+      "event": "run-verify",
+      "message": "run verify passed",
+      "status": "pass",
+      "line": null,
+      "at": "2026-06-05 09:05:29"
+    },
+    {
+      "event": "dev-check",
+      "message": "dev-check attention=9, warning=1",
+      "status": "pass",
+      "line": null,
+      "at": "2026-06-05 09:04:20"
+    }
+  ],
+  "rootCauseCandidates": [
+    {
+      "title": "本轮项目回顾"
+    }
+  ],
+  "verificationSteps": [
+    "run verify passed",
+    "dev-check attention=9, warning=1",
+    "复现一次同类路径，确认新的诊断包仍能导出 runtime-events、timeline、root-cause-candidates 和 diagnostic-report。",
+    "重点核对 run-verify -> quality-verify -> dev-check 的顺序是否符合预期。",
+    "修复后再次执行同一路径，确认时间线不再在历史失败断点中断。",
+    "把最终诊断包与质量报告一起归档，确保后续 Agent 能直接复用已有排查路径。"
+  ],
+  "prevention": [
+    "把本轮修复抽象成项目级 skill，而不是只保留一次性聊天上下文。",
+    "关键路径默认保留 runtime-events、timeline、root-cause-candidates、diagnostic-report 四类证据，而不是等故障出现后再补日志。",
+    "失败事件和补偿事件使用稳定事件名，避免把根因埋在自由文本里。",
+    "修复完成后保留一份成功与失败对照诊断包，并运行 openprd quality . --learn --from <diagnostics-dir> 更新项目经验。"
+  ]
+}

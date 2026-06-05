@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { cjoin, exists, readJson, readText, writeJson, writeText } from './fs-utils.js';
 import { renderQualityEvalArtifact } from './html-artifacts.js';
+import { parseOpenSpecTaskDeps } from './openspec/tasks.js';
 import { renderExperienceSkill, resolveQualityLearningSource } from './quality-learning.js';
 import {
   detectTestStrategyCapabilities,
@@ -614,6 +615,20 @@ function buildEvidenceLedger({ evidenceFiles, activeTasks, observability, busine
   return ledger;
 }
 
+function describeFeatureCoverageLedger(activeTasks = {}) {
+  const total = Number(activeTasks.total ?? 0);
+  const done = Number(activeTasks.done ?? 0);
+  const pending = Number(activeTasks.pending ?? 0);
+  const blocked = Number(activeTasks.blocked ?? 0);
+  if (pending <= 0) {
+    return null;
+  }
+  const progress = total > 0 ? `${done}/${total}` : `${done}`;
+  const changeLabel = activeTasks.activeChange ? `当前变更 ${activeTasks.activeChange}` : '当前任务账本';
+  const blockedText = blocked > 0 ? `，其中 ${blocked} 个因依赖阻塞` : '';
+  return `${changeLabel} 仍有 ${pending} 个未完成任务（已完成 ${progress}${blockedText}）。这通常表示任务账本尚未收口或覆盖证据未补齐，不等于当前实现失败。`;
+}
+
 function detectObservability({ config, files, texts, packageJson }) {
   const { dependencyNames } = packageSignals(packageJson);
   const haystack = [
@@ -715,7 +730,7 @@ function detectEvalHarness({ config, files, texts, packageJson, activeTasks }) {
     warnings.push('未检测到极端数据 fixtures 或压力场景数据。');
   }
   if (activeTasks.total > 0 && activeTasks.pending > 0) {
-    warnings.push(`当前任务清单仍有 ${activeTasks.pending} 个未完成条目，功能覆盖不能判定为完整。`);
+    warnings.push(describeFeatureCoverageLedger(activeTasks) ?? `当前任务清单仍有 ${activeTasks.pending} 个未完成条目，功能覆盖不能判定为完整。`);
   }
   warnings.push(...testStrategy.warnings);
   return {
@@ -854,12 +869,38 @@ async function readActiveTasks(projectRoot) {
       }
     }
   }
+  const taskById = new Map(tasks.filter((task) => task.id).map((task) => [task.id, task]));
+  const blockedTasks = tasks
+    .filter((task) => !task.done)
+    .map((task) => {
+      const deps = parseOpenSpecTaskDeps(task.metadata?.deps);
+      const missing = [];
+      const incomplete = [];
+      for (const depId of deps) {
+        const dependency = taskById.get(depId);
+        if (!dependency) {
+          missing.push(depId);
+          continue;
+        }
+        if (!dependency.done) {
+          incomplete.push(depId);
+        }
+      }
+      return {
+        task,
+        deps,
+        missing,
+        incomplete,
+        ready: missing.length === 0 && incomplete.length === 0,
+      };
+    })
+    .filter((item) => !item.ready);
   return {
     activeChange,
     total: tasks.length,
     done: tasks.filter((task) => task.done).length,
-    pending: tasks.filter((task) => !task.done && !task.blocked).length,
-    blocked: tasks.filter((task) => task.blocked).length,
+    pending: tasks.filter((task) => !task.done).length,
+    blocked: blockedTasks.length,
     tasks,
   };
 }
@@ -1008,7 +1049,9 @@ function buildGates({ observability, evalHarness, businessGuardrails, knowledge,
       id: 'feature-coverage',
       label: '任务与功能覆盖',
       baseStatus: evalHarness.featureCoverage.activeTasks.pending === 0 ? 'pass' : 'needs-attention',
-      baseWarnings: evalHarness.featureCoverage.activeTasks.pending === 0 ? [] : ['仍有未完成任务或缺少任务覆盖证据。'],
+      baseWarnings: evalHarness.featureCoverage.activeTasks.pending === 0
+        ? []
+        : [describeFeatureCoverageLedger(evalHarness.featureCoverage.activeTasks) ?? '仍有未完成任务或缺少任务覆盖证据。'],
       policy,
       evidenceLedger,
     }),
@@ -1199,6 +1242,9 @@ export async function verifyQualityWorkspace(projectRoot, options = {}) {
   }));
   const strict = options.strict === true;
   const blocking = (strict || config.enforcement === 'blocking') && !report.readiness.productionReady;
+  const featureCoverageOnly = report.readiness.failingGates.length === 0
+    && report.readiness.attentionGates.length === 1
+    && report.readiness.attentionGates[0] === 'feature-coverage';
   return {
     ok: !blocking,
     action: 'quality-verify',
@@ -1208,7 +1254,14 @@ export async function verifyQualityWorkspace(projectRoot, options = {}) {
     htmlPath: paths.htmlPath,
     indexPath: paths.indexPath,
     knowledgeReview,
-    errors: blocking ? ['Quality readiness is not production-ready; one or more required gates need evidence or attention.'] : [],
+    errors: blocking
+      ? [
+        featureCoverageOnly
+          ? (describeFeatureCoverageLedger(report.evalHarness?.featureCoverage?.activeTasks ?? null)
+            ?? '当前 feature-coverage 账本尚未收口，不等于当前实现失败。')
+          : 'Quality readiness is not production-ready; one or more required gates need evidence or attention.',
+      ]
+      : [],
   };
 }
 

@@ -173,12 +173,43 @@ async function ensureGrowthFiles(projectRoot) {
   }
 }
 
+async function readGrowthAutoApplyConfig(projectRoot) {
+  const configPath = growthPath(projectRoot, OPENPRD_STANDARDS_CONFIG);
+  const config = await readJsonIfExists(configPath, null);
+  return normalizeGrowthConfig(config?.growth).autoApply;
+}
+
+async function reconcilePendingAutoApplyCandidates(projectRoot, options = {}) {
+  const state = await readGrowthState(projectRoot);
+  const autoApply = options.autoApply ?? await readGrowthAutoApplyConfig(projectRoot);
+  const reconciled = [];
+  for (const candidate of state.candidates) {
+    if (candidate.status !== 'pending') {
+      continue;
+    }
+    const autoApplyDecision = assessAutoApplyGrowthCandidate(candidate, autoApply);
+    if (!autoApplyDecision.ok) {
+      continue;
+    }
+    const applied = await applyGrowthCandidate(projectRoot, candidate, {
+      mode: 'auto',
+      reason: autoApplyDecision.reason,
+    });
+    if (applied.ok) {
+      reconciled.push(applied.candidate);
+    }
+  }
+  return reconciled;
+}
+
 export async function initGrowthWorkspace(projectRoot) {
   await ensureGrowthFiles(projectRoot);
+  const reconciled = await reconcilePendingAutoApplyCandidates(projectRoot);
   return {
     ok: true,
     action: 'growth-init',
     projectRoot,
+    reconciledAutoApplied: reconciled,
     files: {
       dir: OPENPRD_GROWTH_DIR,
       candidates: OPENPRD_GROWTH_CANDIDATES,
@@ -274,7 +305,10 @@ export function assessAutoApplyGrowthCandidate(candidate, rawConfig = {}) {
   if (candidate.scope !== 'project') {
     return { ok: false, reason: 'scope-needs-review' };
   }
-  if (typeof candidate.confidence !== 'number' || candidate.confidence < config.minConfidence) {
+  if (
+    candidate.type !== 'code-extension'
+    && (typeof candidate.confidence !== 'number' || candidate.confidence < config.minConfidence)
+  ) {
     return { ok: false, reason: 'confidence-below-threshold' };
   }
   const extension = normalizeExtension(candidate.key);
@@ -494,7 +528,7 @@ export function validateGrowthConfig(config, errors = []) {
     errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.enabled must be a boolean.`);
   }
   if (growth.reviewRequired !== undefined && growth.reviewRequired !== true) {
-    errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.reviewRequired must remain true; shared rules cannot be auto-applied.`);
+    errors.push(`${OPENPRD_STANDARDS_CONFIG} growth.reviewRequired must remain true; non-whitelisted shared rules still require wrap-up review.`);
   }
   if (growth.candidateLimit !== undefined) {
     const limit = Number(growth.candidateLimit);

@@ -1,12 +1,13 @@
 version: 1
 schema: openprd.benchmarks.v1
-updatedAt: 2026-05-28 11:30:07
+updatedAt: 2026-06-01 11:56:05
 sources:
   - id: milvus-io-ai-code-review-gets-better-when-models-debate-claude-vs-gemini-vs-code
     title: milvus.io/ai-code-review-gets-better-when-models-debate-claude-vs-gemini-vs-codex-vs-qwen-vs-minimax.md
     scope: project
     status: approved
     sourceType: engineering-article
+    sourceKey: null
     url: https://milvus.io/ar/blog/ai-code-review-gets-better-when-models-debate-claude-vs-gemini-vs-codex-vs-qwen-vs-minimax.md
     path: null
     repo: null
@@ -25,14 +26,25 @@ sources:
       recommendation
     value: AI code review / PR review harness；reviewer agreement、交叉验证、误报过滤、hallucination filter、merge
       recommendation
+    adoptedCount: 0
+    lastUsedAt: null
+    evidence: []
+    recentAdoptedCount: 0
+    promotion:
+      threshold: 3
+      windowDays: 7
+      recommended: false
+      recommendedAt: null
+      approveCommand: null
     addedAt: 2026-05-28 11:01:00
     approvedAt: 2026-05-28 11:01:06
-    lastVerified: 2026-05-28 11:30:06
+    lastVerified: 2026-06-01 11:56:02
   - id: nolanlawson-com-using-ai-to-write-better-code-more-slowly
     title: nolanlawson.com/using-ai-to-write-better-code-more-slowly
     scope: project
     status: approved
     sourceType: web
+    sourceKey: null
     url: https://nolanlawson.com/2026/05/25/using-ai-to-write-better-code-more-slowly/
     path: null
     repo: null
@@ -51,6 +63,16 @@ sources:
       recommendation
     value: AI code review / PR review harness；独立审查、主代理先不站队、汇总后再验证、critical/high/medium/low 分级、merge
       recommendation
+    adoptedCount: 0
+    lastUsedAt: null
+    evidence: []
+    recentAdoptedCount: 0
+    promotion:
+      threshold: 3
+      windowDays: 7
+      recommended: false
+      recommendedAt: null
+      approveCommand: null
     addedAt: 2026-05-28 11:00:52
     approvedAt: 2026-05-28 11:01:06
-    lastVerified: 2026-05-28 11:30:07
+    lastVerified: 2026-06-01 11:56:05

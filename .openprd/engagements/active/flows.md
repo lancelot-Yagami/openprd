@@ -2,29 +2,34 @@
 
 ## 主流程
 
-- 维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external。
+- 用户第一次提需求时，OpenPrd 先输出一页项目画像：用户群体、产品形态、第一版先做、先不做、不能破坏、技术落点和风险探针
+- 如果用户表达已经足够清楚，Agent 直接用系统归纳的画像摘要请用户确认
+- 如果用户表达模糊，Agent 先追问少量高价值问题，必要时给 2 到 3 个方向或行业原型供用户选择
+- 画像确认后再进入后续 PRD、review、change 和 tasks 流程
 
 ## Mermaid 流程图
 
 ```mermaid
 flowchart LR
-  entry["入口触发<br/>维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项…"]
-  experience["产品内步骤<br/>修复 OpenPrd verify 边界，避免外部参考目录和 reference discovery 污染主验证，并刷新历史项…"]
-  decision{"决策点<br/>边界情况仍需澄清"}
-  success(["成功结果<br/>存在 reference discovery 时 openprd run . --context 不再默认展示它"])
-  failure[["失败与恢复<br/>reference discovery 仍然混入 run context 或 run verify"]]
-  entry -->|"维护者运行 openprd run . --context 或 openprd r…"| experience
-  experience -->|"系统处理请求"| decision
-  decision -->|"让主验证只关注当前项目源码和当前实现门禁"| success
-  decision -.->|"reference discovery 仍然混入 run context 或 ru…"| failure
+  entry["入口触发<br/>用户第一次提需求时，OpenPrd 先输出一页项目画像：用户群体、产品形态、第一版先做、先不做、不能破坏、技术落点和风险探针"]
+  experience["产品内步骤<br/>如果用户表达已经足够清楚，Agent 直接用系统归纳的画像摘要请用户确认"]
+  decision{"决策点<br/>用户一开始只有一句模糊想法，需要先给候选方向而不是硬追问技术细节"}
+  success(["成功结果<br/>首轮 clarify 能输出结构化的项目画像摘要，并包含用户群体、产品形态、第一版先做、先不做和不能破坏项"])
+  failure[["失败与恢复<br/>入口过重，导致 Vibe Coding 用户在第一次提需时无法回答"]]
+  entry -->|"用户第一次提需求时，OpenPrd 先输出一页项目画像：用户群体、产品形态、第一版…"| experience
+  experience -->|"如果用户表达已经足够清楚，Agent 直接用系统归纳的画像摘要请用户确认"| decision
+  decision -->|"在第一次提需时先形成一页轻量项目画像，而不是直接跳进局部需求修改"| success
+  decision -.->|"入口过重，导致 Vibe Coding 用户在第一次提需时无法回答"| failure
 ```
 
 ## 边界情况
 
-- 待补充
+- 用户一开始只有一句模糊想法，需要先给候选方向而不是硬追问技术细节
+- 已有项目上下文时应优先沿用已知事实，而不是把所有画像问题重问一遍
+- 局部 copy、样式或小交互修正不应被错误升级成重画像流程
 
 ## 失败模式
 
-- reference discovery 仍然混入 run context 或 run verify
-- standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没
-- fleet 更新后历史项目仍保留旧的 verify 噪音行为
+- 入口过重，导致 Vibe Coding 用户在第一次提需时无法回答
+- 入口过轻，导致 Agent 没有先确认项目边界就直接落地
+- 错误复用旧 active change 或旧 PRD 上下文，导致实现偏题

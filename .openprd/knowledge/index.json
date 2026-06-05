@@ -1,7 +1,47 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-13 14:08:50",
-  "incidents": [],
-  "patterns": [],
-  "skills": []
+  "updatedAt": "2026-06-05 09:05:29",
+  "incidents": [
+    {
+      "incidentId": "incident-candidate-turn-1780116203372-5f266a79e968c758",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/incidents/incident-candidate-turn-1780116203372-5f266a79e968c758.json",
+      "sourceKind": "diagnostic-bundle",
+      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758"
+    }
+  ],
+  "patterns": [
+    {
+      "patternId": "diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/patterns/diagnostic-candidate-turn-1780116203372-5f266a79e968c758.json",
+      "sourceKind": "diagnostic-bundle",
+      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758"
+    }
+  ],
+  "skills": [
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/skills/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md",
+      "sourceKind": "diagnostic-bundle",
+      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758"
+    }
+  ],
+  "candidates": [
+    {
+      "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
+      "status": "promoted",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/candidate.json",
+      "sourceKind": "diagnostic-report",
+      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758",
+      "title": "本轮项目回顾",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md"
+    }
+  ],
+  "drafts": [
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md",
+      "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
+      "status": "promoted"
+    }
+  ]
 }

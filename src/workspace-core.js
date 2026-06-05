@@ -86,19 +86,12 @@ const WORKSPACE_SEED_REFRESH_FILES = [
 ];
 const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'artifacts',
-  'benchmarks',
   'discovery',
   'growth',
   'harness',
-  'engagements/active/prd.md',
-  'engagements/active/flows.md',
-  'engagements/active/roles.md',
-  'engagements/active/handoff.md',
-  'engagements/work-units',
   'knowledge',
   'learning',
   'quality',
-  'reviews',
   'state',
   'sessions',
   'exports',
@@ -115,46 +108,6 @@ const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'engagements/active/verification.md',
 ]);
 
-const DEFAULT_ACTIVE_PRD = `# PRD
-
-## 类型专项模块
-
-- 类型: 待确认
-- humanAgentContract: 待补充
-- autonomyBoundary: 待补充
-- toolBoundary: 待补充
-- stateModel: 待补充
-- evalPlan: 待补充
-`;
-
-const DEFAULT_ACTIVE_FLOWS = `# 流程
-
-## 主流程
-
-- 待补充
-`;
-
-const DEFAULT_ACTIVE_ROLES = `# 角色
-
-## 用户
-
-- 主要用户:
-- 待补充
-
-- 次要用户:
-- 待补充
-
-- 相关方:
-- 待补充
-`;
-
-const DEFAULT_ACTIVE_HANDOFF = `# 交接
-
-- 负责人: 待补充
-- 下一步: 待补充
-- 目标系统: OpenPrd
-`;
-
 const DEFAULT_DISCOVERY_CONFIG = {
   activeChange: null,
   taskSharding: {
@@ -166,24 +119,7 @@ const DEFAULT_DISCOVERY_CONFIG = {
   taskMetadata: {
     stableIdPattern: 'T###.##',
     required: ['done', 'verify'],
-    optional: [
-      'deps',
-      'type',
-      'test-layer',
-      'test-size',
-      'test-scope',
-      'evidence',
-      'evidence-plan',
-      'upgrade-reason',
-      'waiver',
-      'waiver-reason',
-      'execution-mode',
-      'parallel-group',
-      'write-scope',
-      'owner-role',
-      'local-verify',
-      'integration-owner',
-    ],
+    optional: ['deps', 'type'],
     dependencyOrder: 'dependencies must appear before dependents',
   },
 };
@@ -742,10 +678,6 @@ async function ensureWorkspaceSkeleton(projectRoot, options = {}) {
   await fs.mkdir(cjoin(workspaceRoot, 'engagements', 'active'), { recursive: true });
 
   const defaults = [
-    [cjoin(workspaceRoot, 'engagements', 'active', 'prd.md'), DEFAULT_ACTIVE_PRD],
-    [cjoin(workspaceRoot, 'engagements', 'active', 'flows.md'), DEFAULT_ACTIVE_FLOWS],
-    [cjoin(workspaceRoot, 'engagements', 'active', 'roles.md'), DEFAULT_ACTIVE_ROLES],
-    [cjoin(workspaceRoot, 'engagements', 'active', 'handoff.md'), DEFAULT_ACTIVE_HANDOFF],
     [cjoin(workspaceRoot, 'engagements', 'active', 'decision-log.md'), '# 决策记录\n\n- 已初始化 OpenPrd 决策跟踪。\n'],
     [cjoin(workspaceRoot, 'engagements', 'active', 'open-questions.md'), '# 开放问题\n\n- 已初始化 OpenPrd 问题跟踪。\n'],
     [cjoin(workspaceRoot, 'engagements', 'active', 'progress.md'), '# 进度\n\n- 已初始化 OpenPrd 进度跟踪。\n'],
@@ -1002,12 +934,13 @@ async function migrateWorkspaceSkeleton(projectRoot, options = {}) {
   }
 
   const seedIntake = await readText(cjoin(SEED_WORKSPACE, 'engagements', 'active', 'intake.md'));
-  const typeSpecificBlock = extractMarkdownSection(DEFAULT_ACTIVE_PRD, '## 类型专项模块') || DEFAULT_ACTIVE_PRD;
+  const seedPrd = await readText(cjoin(SEED_WORKSPACE, 'engagements', 'active', 'prd.md'));
+  const typeSpecificBlock = extractMarkdownSection(seedPrd, '## 类型专项模块') || seedPrd;
   await ensureActiveFileContains(projectRoot, 'engagements/active/intake.md', '我们要解决什么问题？', seedIntake, changes);
   await ensureActiveFileContains(projectRoot, 'engagements/active/prd.md', '类型专项模块', typeSpecificBlock, changes);
-  await ensureHeadingFile(projectRoot, 'engagements/active/flows.md', '# 流程', DEFAULT_ACTIVE_FLOWS, changes);
-  await ensureHeadingFile(projectRoot, 'engagements/active/roles.md', '# 角色', DEFAULT_ACTIVE_ROLES, changes);
-  await ensureHeadingFile(projectRoot, 'engagements/active/handoff.md', '# 交接', DEFAULT_ACTIVE_HANDOFF, changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/flows.md', '# 流程', '# 流程\n\n- 已初始化 OpenPrd 流程说明。\n', changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/roles.md', '# 角色', '# 角色\n\n- 已初始化 OpenPrd 角色说明。\n', changes);
+  await ensureHeadingFile(projectRoot, 'engagements/active/handoff.md', '# 交接', '# 交接\n\n- 已初始化 OpenPrd 交接摘要。\n', changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/decision-log.md', '# 决策记录', '# 决策记录\n\n- 已初始化 OpenPrd 决策跟踪。\n', changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/open-questions.md', '# 开放问题', '# 开放问题\n\n- 已初始化 OpenPrd 问题跟踪。\n', changes);
   await ensureHeadingFile(projectRoot, 'engagements/active/progress.md', '# 进度', '# 进度\n\n- 已初始化 OpenPrd 进度跟踪。\n', changes);
@@ -1287,7 +1220,7 @@ function listMissing(actual, expected) {
   return expected.filter((item) => !actualSet.has(item));
 }
 
-async function validateWorkspace(projectRoot) {
+async function validateWorkspace(projectRoot, options = {}) {
   const report = {
     valid: true,
     errors: [],
@@ -1524,7 +1457,11 @@ async function validateWorkspace(projectRoot) {
     report.errors.push('state/events.jsonl is missing');
   }
 
-  const standards = await checkStandardsWorkspace(projectRoot, { optional: true });
+  const standards = await checkStandardsWorkspace(projectRoot, {
+    optional: true,
+    sourceManuals: options.sourceManuals,
+    docsContent: options.docsContent,
+  });
   if (!standards.skipped) {
     if (standards.errors.length > 0) {
       report.valid = false;

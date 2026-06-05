@@ -6,6 +6,7 @@ import { timestamp } from './time.js';
 const OPENPRD_HARNESS_DIR = path.join('.openprd', 'harness');
 const OPENPRD_HARNESS_REQUIREMENT_GATE = path.join(OPENPRD_HARNESS_DIR, 'requirement-gate.json');
 const OPENPRD_HARNESS_SESSION_BINDINGS_DIR = path.join(OPENPRD_HARNESS_DIR, 'session-bindings');
+const OPENPRD_STATE_CURRENT = path.join('.openprd', 'state', 'current.json');
 
 function normalizeSessionId(sessionId) {
   const text = String(sessionId ?? '').trim();
@@ -26,6 +27,20 @@ function sessionBindingPath(projectRoot, sessionId) {
 
 async function readLegacyRequirementGate(projectRoot) {
   return readJson(path.join(projectRoot, OPENPRD_HARNESS_REQUIREMENT_GATE)).catch(() => null);
+}
+
+async function readWorkspaceCurrentState(projectRoot) {
+  return readJson(path.join(projectRoot, OPENPRD_STATE_CURRENT)).catch(() => null);
+}
+
+async function resolveBindingSessionId(projectRoot, options = {}, legacyGate = null) {
+  const workspaceCurrentState = await readWorkspaceCurrentState(projectRoot);
+  return normalizeSessionId(
+    options.sessionId
+      ?? options.currentSessionId
+      ?? workspaceCurrentState?.laneSessionId
+      ?? legacyGate?.sessionId
+  );
 }
 
 async function readSessionBinding(projectRoot, sessionId) {
@@ -82,7 +97,7 @@ async function upsertSessionBinding(projectRoot, sessionId, patch = {}) {
 
 async function syncSessionBindingFromSnapshot(projectRoot, snapshot, options = {}) {
   const legacyGate = await readLegacyRequirementGate(projectRoot);
-  const sessionId = normalizeSessionId(options.sessionId ?? legacyGate?.sessionId);
+  const sessionId = await resolveBindingSessionId(projectRoot, options, legacyGate);
   if (!sessionId || !snapshot?.versionId) {
     return null;
   }
@@ -106,7 +121,7 @@ async function syncSessionBindingFromSnapshot(projectRoot, snapshot, options = {
 
 async function syncSessionBindingFromReview(projectRoot, snapshot, options = {}) {
   const legacyGate = await readLegacyRequirementGate(projectRoot);
-  const sessionId = normalizeSessionId(options.sessionId ?? legacyGate?.sessionId);
+  const sessionId = await resolveBindingSessionId(projectRoot, options, legacyGate);
   if (!sessionId || !snapshot?.versionId) {
     return null;
   }
@@ -129,7 +144,7 @@ async function syncSessionBindingFromReview(projectRoot, snapshot, options = {})
 
 async function syncSessionBindingFromChange(projectRoot, changeId, options = {}) {
   const legacyGate = await readLegacyRequirementGate(projectRoot);
-  const sessionId = normalizeSessionId(options.sessionId ?? legacyGate?.sessionId);
+  const sessionId = await resolveBindingSessionId(projectRoot, options, legacyGate);
   if (!sessionId || !changeId) {
     return null;
   }

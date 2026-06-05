@@ -19,7 +19,7 @@
 - `node --check <file>`: 对单个 ESM 文件做语法检查。
 - `node ./bin/openprd.js standards . --verify`: 校验 `docs/basic/` 和 standards 基础契约。
 - `node ./bin/openprd.js dev-check . <file...>` / `node scripts/openprd-dev-check.mjs . <file...>`: Agent 研发期检查 touched code files 的关注程度和下一步动作建议；需要关注的文件会输出最终回复可直接使用的 **后续建议** Markdown 区块。
-- `node ./bin/openprd.js grow . --review|--apply --id <candidate-id>|--reject --id <candidate-id>`: 收工时审查并固化需要用户确认的配置、规则候选或 user-local 偏好；高置信工具识别补全可由 dev-check 自动固化并记录。
+- `node ./bin/openprd.js grow . --review|--apply --id <candidate-id>|--reject --id <candidate-id>`: 收工时审查并固化需要用户确认的配置、规则候选或 user-local 偏好；代码扩展识别这类白名单工具补全可由 dev-check 自动固化并记录。
 - `node ./bin/openprd.js synthesize . --work-unit <id> --target-root <path>` / `node ./bin/openprd.js review . --mark confirmed --version <id> --digest <sha256> --work-unit <id>`: 绑定并校验工具无关的需求工作单元，避免多 Agent 或多对话确认到其他需求。
 - `node ./bin/openprd.js fleet <root> --sync-registry`: 把当前 root 下已初始化的 `.openprd/` 工作区回填到 `~/.openprd/registry/workspaces.jsonl`，给后续历史项目更新提供全局视角。
 - `node ./bin/openprd.js fleet <root> --backfill-work-units`: 为历史 OpenPrD 工作区的既有 PRD 版本补 work unit 绑定、digest 校验命令和稳定评审 artifact；`--update-openprd` 会顺带执行该回填。

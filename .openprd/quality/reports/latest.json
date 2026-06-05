@@ -1,7 +1,7 @@
 {
-  "reportId": "eval-20260528224408",
-  "jsonPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/quality/reports/eval-20260528224408.json",
-  "htmlPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/quality/reports/eval-20260528224408.html",
-  "generatedAt": "2026-05-28 22:44:09",
+  "reportId": "eval-20260605090528",
+  "jsonPath": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/quality/reports/eval-20260605090528.json",
+  "htmlPath": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/quality/reports/eval-20260605090528.html",
+  "generatedAt": "2026-06-05 09:05:29",
   "status": "production-ready"
 }

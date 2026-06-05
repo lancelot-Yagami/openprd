@@ -19,6 +19,20 @@
  */
 import { printKnowledgeReview } from './shared-print.js';
 
+function describeFeatureCoverageLedger(report) {
+  const activeTasks = report?.evalHarness?.featureCoverage?.activeTasks ?? null;
+  if (!activeTasks || Number(activeTasks.pending ?? 0) <= 0) {
+    return null;
+  }
+  const total = Number(activeTasks.total ?? 0);
+  const done = Number(activeTasks.done ?? 0);
+  const pending = Number(activeTasks.pending ?? 0);
+  const blocked = Number(activeTasks.blocked ?? 0);
+  const progress = total > 0 ? `${done}/${total}` : `${done}`;
+  const changeLabel = activeTasks.activeChange ? `当前变更 ${activeTasks.activeChange}` : '当前任务账本';
+  return `${changeLabel} 仍有 ${pending} 个未完成任务（已完成 ${progress}${blocked > 0 ? `，其中 ${blocked} 个因依赖阻塞` : ''}）。这表示账本未收口，不等于当前实现失败。`;
+}
+
 function printStandardsResult(result, json) {
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -132,7 +146,12 @@ function printQualityResult(result, json) {
     return;
   }
 
-  console.log(`OpenPrd quality: ${result.ok ? '完成' : '失败'}`);
+  const headline = result.report
+    ? (result.report.readiness.ok && !result.report.readiness.productionReady
+      ? '需关注'
+      : (result.ok ? '完成' : '失败'))
+    : (result.ok ? '完成' : '失败');
+  console.log(`OpenPrd quality: ${headline}`);
   if (result.report) {
     console.log(`质量状态: ${result.report.summary.status}`);
     console.log(`生产就绪: ${result.report.readiness.productionReady ? '是' : '否'}`);
@@ -143,6 +162,10 @@ function printQualityResult(result, json) {
     }
     if (result.report.readiness.attentionGates.length > 0) {
       console.log(`需关注门禁: ${result.report.readiness.attentionGates.join(', ')}`);
+    }
+    const featureCoverageLedger = describeFeatureCoverageLedger(result.report);
+    if (featureCoverageLedger) {
+      console.log(`账本提示: ${featureCoverageLedger}`);
     }
     console.log('门禁:');
     for (const gate of result.report.gates) {

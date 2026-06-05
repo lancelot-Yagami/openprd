@@ -127,3 +127,152 @@
 - 写作状态: agent-authored。
 - 证据源: 18。
 - 章节数: 2。
+
+## 2026-06-02 11:39:56
+
+- Captured clarification for meta.title, meta.owner, problem.problemStatement, problem.whyNow, users.primaryUsers, users.stakeholders, goals.goals, goals.successMetrics, goals.acceptanceGoals, scope.inScope, scope.outOfScope, scenarios.primaryFlows, scenarios.edgeCases, scenarios.failureModes, requirements.functional, requirements.nonFunctional, requirements.businessRules, constraints.technical, constraints.dependencies, risks.assumptions, risks.risks, risks.openQuestions, typeSpecific.fields.humanAgentContract, typeSpecific.fields.autonomyBoundary, typeSpecific.fields.toolBoundary, typeSpecific.fields.stateModel, typeSpecific.fields.evalPlan, handoff.owner, handoff.nextStep, handoff.targetSystem, businessGuardrails.costDrivers, businessGuardrails.usageLimits, businessGuardrails.abusePrevention, businessGuardrails.monitoringSignals, businessGuardrails.alertThresholds, businessGuardrails.stopLossActions.
+
+## 2026-06-02 11:39:56
+
+- 已锁定产品类型为 agent。
+- 模板包已设置为 agent。
+
+## 2026-06-02 11:39:56
+
+- 已生成版本 v0002。
+- 产品类型: agent。
+- 模板包: agent。
+- Digest: e44eccd0d6fe1a7fd962ece31187f920e1a71de76122d15b826fb0a66d934d35.
+
+## 2026-06-02 12:21:52
+
+- Captured clarification for meta.title.
+
+## 2026-06-02 12:21:52
+
+- Captured clarification for users.primaryUsers.
+
+## 2026-06-02 12:21:52
+
+- Captured clarification for problem.problemStatement.
+
+## 2026-06-02 12:21:52
+
+- Captured clarification for problem.whyNow.
+
+## 2026-06-02 12:22:05
+
+- Captured clarification for goals.successMetrics.
+
+## 2026-06-02 12:22:05
+
+- Captured clarification for goals.goals.
+
+## 2026-06-02 12:22:05
+
+- Captured clarification for users.stakeholders.
+
+## 2026-06-02 12:22:05
+
+- Captured clarification for goals.acceptanceGoals.
+
+## 2026-06-02 12:22:18
+
+- Captured clarification for scope.inScope.
+
+## 2026-06-02 12:22:18
+
+- Captured clarification for scenarios.primaryFlows.
+
+## 2026-06-02 12:22:18
+
+- Captured clarification for scope.outOfScope.
+
+## 2026-06-02 12:22:18
+
+- Captured clarification for scenarios.edgeCases.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for scenarios.failureModes.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for requirements.functional.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for businessGuardrails.abusePrevention.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for risks.openQuestions.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for requirements.nonFunctional.
+
+## 2026-06-02 12:22:37
+
+- Captured clarification for requirements.businessRules.
+
+## 2026-06-02 12:22:44
+
+- 已生成版本 v0003。
+- 产品类型: agent。
+- 模板包: agent。
+- Digest: f1b18bc47cbd76f784b7682483eafa24eb02230e23189dad29a2202b61544918.
+
+## 2026-06-02 12:23:46
+
+- Captured clarification for meta.title.
+
+## 2026-06-02 12:23:51
+
+- Captured clarification for goals.goals.
+
+## 2026-06-02 12:23:59
+
+- Captured clarification for goals.successMetrics.
+
+## 2026-06-02 12:24:09
+
+- Captured clarification for goals.acceptanceGoals.
+
+## 2026-06-02 12:24:15
+
+- Captured clarification for scenarios.primaryFlows.
+
+## 2026-06-02 12:24:22
+
+- Captured clarification for scenarios.failureModes.
+
+## 2026-06-02 12:24:30
+
+- Captured clarification for requirements.nonFunctional.
+
+## 2026-06-02 12:24:36
+
+- Captured clarification for businessGuardrails.abusePrevention.
+
+## 2026-06-02 12:24:42
+
+- 已生成版本 v0004。
+- 产品类型: agent。
+- 模板包: agent。
+- Digest: 0dbead578a9472100fb0c7cf185cd5500acd2d59830794cfa120f4f6976ee3f7.
+
+## 2026-06-02 13:28:21
+
+- Captured clarification for meta.title, meta.owner, problem.problemStatement, problem.whyNow, users.primaryUsers, users.stakeholders, goals.goals, goals.successMetrics, goals.acceptanceGoals, scope.inScope, scope.outOfScope, scenarios.primaryFlows, scenarios.edgeCases, scenarios.failureModes, requirements.functional, requirements.nonFunctional, requirements.businessRules, constraints.technical, constraints.dependencies, risks.assumptions, risks.risks, risks.openQuestions, handoff.owner, handoff.nextStep, handoff.targetSystem, businessGuardrails.costDrivers, businessGuardrails.usageLimits, businessGuardrails.abusePrevention, businessGuardrails.monitoringSignals, businessGuardrails.alertThresholds, businessGuardrails.stopLossActions, typeSpecific.fields.humanAgentContract, typeSpecific.fields.autonomyBoundary, typeSpecific.fields.toolBoundary, typeSpecific.fields.stateModel, typeSpecific.fields.evalPlan.
+
+## 2026-06-02 13:28:28
+
+- Captured clarification for problem.evidence, constraints.compliance.
+
+## 2026-06-02 13:28:35
+
+- 已生成版本 v0005。
+- 产品类型: agent。
+- 模板包: agent。
+- Digest: 7f0e2d2730982a2ae96647d2377f6204e54f8adadf1b18b05f4bc7167046c575.

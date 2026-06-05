@@ -893,7 +893,7 @@ test('doctor reports registry hygiene warnings for overbroad and nested workspac
   assert.ok(doctor.warnings.some((warning) => warning.includes('父子嵌套')));
 });
 
-test('fleet update reports workspace health gaps without blocking generated guidance updates', async () => {
+test('fleet update backfills missing active artifacts and ignores legacy content-doc debt in batch health', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openprd-fleet-health-test-'));
   const openprdHome = path.join(root, '.openprd-home');
   const existing = path.join(root, 'existing-openprd');
@@ -902,6 +902,11 @@ test('fleet update reports workspace health gaps without blocking generated guid
   await initWorkspace(existing, { templatePack: 'agent', openprdHome });
   await fs.appendFile(path.join(existing, '.codex', 'skills', 'openprd-harness', 'SKILL.md'), '\nmanual drift\n');
   await fs.writeFile(path.join(existing, 'docs', 'basic', 'backend-structure.md'), '# Backend\n', 'utf8');
+  await fs.mkdir(path.join(existing, 'Output', 'wechat'), { recursive: true });
+  await fs.writeFile(path.join(existing, 'Output', 'wechat', 'article.html'), '<article>legacy output</article>\n');
+  await fs.rm(path.join(existing, '.openprd', 'engagements', 'active', 'flows.md'));
+  await fs.rm(path.join(existing, '.openprd', 'engagements', 'active', 'roles.md'));
+  await fs.rm(path.join(existing, '.openprd', 'engagements', 'active', 'handoff.md'));
 
   const updated = await fleetWorkspace(root, {
     updateOpenprd: true,
@@ -912,13 +917,21 @@ test('fleet update reports workspace health gaps without blocking generated guid
   assert.equal(updated.ok, true);
   assert.equal(updated.summary.updated, 1);
   assert.equal(updated.summary.failed, 0);
-  assert.equal(updated.summary.healthAttention, 1);
+  assert.equal(updated.summary.healthAttention, 0);
   assert.equal(updated.errors.length, 0);
   assert.equal(project.status, 'updated');
   assert.equal(project.ok, true);
-  assert.equal(project.healthOk, false);
-  assert.ok(project.healthErrors.some((error) => error.includes('docs/basic/backend-structure.md')));
+  assert.equal(project.healthOk, true);
+  assert.deepEqual(project.healthErrors ?? [], []);
   assert.ok((await fs.readFile(path.join(existing, '.codex', 'skills', 'openprd-harness', 'SKILL.md'), 'utf8')).includes('OPENPRD:GENERATED'));
+  assert.ok(await fs.stat(path.join(existing, '.openprd', 'engagements', 'active', 'flows.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(existing, '.openprd', 'engagements', 'active', 'roles.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(existing, '.openprd', 'engagements', 'active', 'handoff.md')).then(() => true));
+
+  const strictDoctor = await doctorWorkspace(existing, { openprdHome });
+  assert.equal(strictDoctor.ok, false);
+  assert.ok(strictDoctor.errors.some((error) => error.includes('docs/basic/backend-structure.md')));
+  assert.ok(strictDoctor.errors.some((error) => error.includes('Output/wechat/article.html')));
 
   const cliLogs = [];
   const originalLog = console.log;
@@ -930,8 +943,7 @@ test('fleet update reports workspace health gaps without blocking generated guid
   }
   assert.ok(cliLogs.some((line) => line.includes('OpenPrd fleet: 通过')));
   assert.ok(cliLogs.some((line) => line.includes('失败 0')));
-  assert.ok(cliLogs.some((line) => line.includes('项目健康: 1 个需关注')));
-  assert.ok(cliLogs.some((line) => line.includes('需关注: standards: docs/basic/backend-structure.md')));
+  assert.ok(cliLogs.every((line) => !line.includes('项目健康:')));
 });
 
 test('fleet update preserves standards external reference paths', async () => {

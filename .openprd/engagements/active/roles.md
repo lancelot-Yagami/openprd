@@ -3,19 +3,20 @@
 ## 用户
 
 - 主要用户:
-- 维护 OpenPrd 的 Agent 工程师
-- 使用 OpenPrd 管理历史项目的项目维护者
+- 第一次用 OpenPrd 梳理产品想法的产品经理、独立开发者与 Vibe Coding 用户
+- 需要在模糊需求下帮助用户收敛方向并继续落地的 Agent 协作者
 
 - 次要用户:
 - 待补充
 
 - 相关方:
-- 待补充
+- 维护 OpenPrd requirement-intake、workflow 和模板的开发者
+- 后续需要基于已确认上下文继续实现的多轮 Agent 会话
 
 ## 类型专项
 
-- humanAgentContract: Agent 可以识别并提示 reference discovery 与外部参考目录边界，但把目录正式归类为 external reference 仍需要人确认；批量刷新历史项目可以自动执行。
-- autonomyBoundary: Agent 可以修改 OpenPrd CLI、补测试、更新文档、运行 fleet dry-run 与 update-openprd/backfill-work-units，并验证结果；不得静默把任意历史目录永久归类为 external reference。
-- toolBoundary: 使用本地代码检索、OpenPrd CLI、自带测试、fleet 更新、doctor 与 verify 完成实现和验证；本次不需要外部第三方文档调研。
-- stateModel: 需要保留三类状态：当前项目源码验证状态、reference discovery 状态、standards external reference 显式配置；主 run/verify 只默认消费第一类，其他两类按边界显式暴露。
-- evalPlan: 通过针对 run-harness、standards 和 fleet 的单测与集成验证评估；再用历史项目 dry-run 与 update-openprd/backfill-work-units 验证刷新结果。
+- humanAgentContract: Agent 先归纳用户群体、产品形态、第一版切片、边界与风险，再请求用户确认；如果信息不足，只能提出候选方向，不能把猜测当成定论。
+- autonomyBoundary: Agent 可以根据当前需求和已有工作区状态推断首轮项目画像，但在用户确认前不得把推断直接写成最终需求事实或越过需求入口去改实现。
+- toolBoundary: 仅使用本地 OpenPrd workflow、模板、测试和文档完成这次改动，不依赖新的外部运行时。
+- stateModel: 新需求进入时先形成 project framing，再进入 requirement clarification、review/change/tasks 与实现。
+- evalPlan: 通过 workspace flow、requirement gate、CLI 输出和模板相关测试验证新流程，同时运行 dev-check、standards、quality 与 run verify。

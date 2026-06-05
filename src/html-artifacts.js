@@ -1189,6 +1189,11 @@ function reviewCopyBundle({ label, command, payload, message = null }) {
   ].filter(Boolean).join('\n\n');
 }
 
+function reviewContinueMessage(snapshot) {
+  const reviewLabel = snapshot?.versionId ? `当前稳定评审稿 ${snapshot.versionId}` : '当前稳定评审稿';
+  return `${reviewLabel}已确认。请先记录这版稳定评审稿，并继续当前 OpenPrd 下一步。若 review 后 tasks 已就绪但还需要执行授权，请直接展示执行确认清单，不要再泛泛确认。`;
+}
+
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
@@ -1214,7 +1219,12 @@ function renderReviewDecision(snapshot) {
   const payload = JSON.stringify(buildReviewExportPayload(snapshot), null, 2);
   const confirmCommand = reviewCommand(snapshot, 'confirmed');
   const reviseCommand = reviewCommand(snapshot, 'needs-revision', '说明需要调整的点');
-  const confirmCopy = reviewCopyBundle({ label: '认可方案', command: confirmCommand, payload });
+  const confirmCopy = reviewCopyBundle({
+    label: '认可并继续下一步',
+    command: confirmCommand,
+    payload,
+    message: reviewContinueMessage(snapshot),
+  });
   const reviseCopy = reviewCopyBundle({ label: '需要调整', command: reviseCommand, payload });
   return `
     <nav class="review-bottom-bar" aria-label="评审决定">
@@ -1223,7 +1233,7 @@ function renderReviewDecision(snapshot) {
           需要调整
         </button>
         <button type="button" class="review-bottom-action confirm" data-copy-value="${escapeHtml(confirmCopy)}" title="${escapeHtml(confirmCommand)}">
-          认可方案
+          认可并继续
         </button>
       </div>
     </nav>

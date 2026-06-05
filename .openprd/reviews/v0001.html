@@ -37,7 +37,8 @@
       .review-topbar {
         display: flex;
         align-items: center;
-        justify-content: flex-start;
+        justify-content: space-between;
+        flex-wrap: wrap;
         gap: 16px;
         margin-bottom: 16px;
       }
@@ -51,6 +52,35 @@
         color: var(--review-muted);
         padding: 0 12px;
         font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .review-project-version {
+        display: grid;
+        gap: 4px;
+        min-width: 220px;
+        margin-left: auto;
+        padding: 12px 16px;
+        border: 1px solid #bfdbfe;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+        box-shadow: 0 12px 24px rgba(37, 99, 235, 0.08);
+      }
+      .review-project-version-label {
+        color: var(--review-blue);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+      .review-project-version-value {
+        color: var(--review-text);
+        font-family: var(--review-mono);
+        font-size: 22px;
+        line-height: 1.1;
+      }
+      .review-project-version-meta {
+        color: var(--review-muted);
+        font-size: 12px;
         font-weight: 700;
         letter-spacing: 0;
       }
@@ -433,6 +463,11 @@
       @media (max-width: 620px) {
         .review-page { padding: 18px 12px 128px; }
         .review-topbar { align-items: flex-start; flex-direction: column; }
+        .review-project-version {
+          min-width: 0;
+          width: 100%;
+          margin-left: 0;
+        }
         .review-overview { padding: 18px; }
         .review-overview h1 {
           font-size: 26px;
@@ -460,6 +495,13 @@
     <main class="review-page">
       <header class="review-topbar">
         <div class="review-brand">OpenPrd / 评审面板</div>
+        
+        <div class="review-project-version" aria-label="项目版本">
+          <span class="review-project-version-label">项目版本</span>
+          <strong class="review-project-version-value">0.1.2</strong>
+          <span class="review-project-version-meta">当前版本 · 6 条变化</span>
+        </div>
+  
       </header>
       
     <section class="review-overview" aria-labelledby="reviewOverviewTitle">
@@ -544,7 +586,7 @@
         </div>
       </header>
       <div class="review-chip-row" aria-label="主流程与边界情况重点摘要">
-        <span class="review-chip">--verify 时</span><span class="review-chip">reference discovery 仍然混入 run context 或 run verify</span><span class="review-chip">standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没</span><span class="review-chip">fleet 更新后历史项目仍保留旧的 verify 噪音行为</span>
+        <span class="review-chip">优化维护者运行 openprd</span><span class="review-chip">优化仍然混入 run cont</span><span class="review-chip">优化继续被 research</span><span class="review-chip">调整后历史项目仍保留旧的 ve</span>
       </div>
       
     <div class="review-journey-map" aria-label="主流程小图">
@@ -571,7 +613,7 @@
           <circle class="review-journey-dot stage-step" cx="282" cy="64" r="12" />
           <text class="review-journey-number" x="282" y="64" text-anchor="middle">2</text>
           <text class="review-journey-tag" x="340" y="66" text-anchor="middle">关键步骤</text>
-          <text class="review-journey-label" x="340" y="92" text-anchor="middle"><tspan x="340" dy="0">--context或openprd</tspan><tspan x="340" dy="13">run</tspan></text>
+          <text class="review-journey-label" x="340" y="92" text-anchor="middle"><tspan x="340" dy="0">重点说明</tspan></text>
         </g>
         <g>
           <rect class="review-journey-node stage-outcome" x="478" y="40" width="176" height="96" rx="8" />
@@ -592,12 +634,12 @@
           <circle class="review-journey-dot stage-recovery" cx="388" cy="218" r="12" />
           <text class="review-journey-number" x="388" y="218" text-anchor="middle">R</text>
           <text class="review-journey-tag" x="466" y="220" text-anchor="middle">恢复路径</text>
-          <text class="review-journey-label" x="466" y="246" text-anchor="middle"><tspan x="466" dy="0">referencediscovery仍然混</tspan><tspan x="466" dy="13">入runcontext或runverify</tspan></text>
+          <text class="review-journey-label" x="466" y="246" text-anchor="middle"><tspan x="466" dy="0">重点说明</tspan></text>
         </g>
       </svg>
     </div>
   
-      <ul class="review-panel-list"><li><strong class="review-detail-summary">用量额度不变</strong><span class="review-detail-body">：维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external。</span></li><li><strong class="review-detail-summary">重点说明</strong><span class="review-detail-body">：reference discovery 仍然混入 run context 或 run verify</span></li><li><strong class="review-detail-summary">重点说明</strong><span class="review-detail-body">：standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没</span></li><li><strong class="review-detail-summary">重点说明</strong><span class="review-detail-body">：fleet 更新后历史项目仍保留旧的 verify 噪音行为</span></li></ul>
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">优化维护者运行 openprd</strong><span class="review-detail-body">：维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external</span></li><li><strong class="review-detail-summary">优化仍然混入 run cont</strong><span class="review-detail-body">：reference discovery 仍然混入 run context 或 run verify</span></li><li><strong class="review-detail-summary">优化继续被 research</strong><span class="review-detail-body">：standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没</span></li><li><strong class="review-detail-summary">调整后历史项目仍保留旧的 ve</strong><span class="review-detail-body">：fleet 更新后历史项目仍保留旧的 verify 噪音行为</span></li></ul>
     </section>
   
 
@@ -642,10 +684,10 @@
         </div>
       </header>
       <div class="review-chip-row" aria-label="开放问题与风险重点摘要">
-        <span class="review-chip">本次只收敛默认边界</span>
+        <span class="review-chip">调整只收敛默认边界</span>
       </div>
       
-      <ul class="review-panel-list"><li><strong class="review-detail-summary">本次只收敛默认边界</strong><span class="review-detail-body">：本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充</span></li></ul>
+      <ul class="review-panel-list"><li><strong class="review-detail-summary">调整只收敛默认边界</strong><span class="review-detail-body">：本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充</span></li></ul>
     </section>
   
       </section>
@@ -673,6 +715,34 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
     &quot;确认主流程与失败路径&quot;,
     &quot;确认关键风险与开放问题&quot;
   ],
+  &quot;summaryStyle&quot;: {
+    &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+    &quot;preferredVerbs&quot;: [
+      &quot;新增&quot;,
+      &quot;修复&quot;,
+      &quot;优化&quot;,
+      &quot;调整&quot;,
+      &quot;移除&quot;
+    ],
+    &quot;panelExamples&quot;: {
+      &quot;flow&quot;: {
+        &quot;summary&quot;: &quot;新增入口&quot;,
+        &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+      },
+      &quot;function&quot;: {
+        &quot;summary&quot;: &quot;优化说明&quot;,
+        &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+      },
+      &quot;guardrail&quot;: {
+        &quot;summary&quot;: &quot;调整边界&quot;,
+        &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+      },
+      &quot;risk&quot;: {
+        &quot;summary&quot;: &quot;修复误判&quot;,
+        &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+      }
+    }
+  },
   &quot;sectionKeys&quot;: [
     &quot;meta&quot;,
     &quot;problem&quot;,
@@ -689,8 +759,40 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
   ],
   &quot;presentationContract&quot;: {
     &quot;intent&quot;: &quot;这些限制用于反馈给 Agent 重新概括，不由 HTML 模板截断原文。&quot;,
+    &quot;summaryStyle&quot;: {
+      &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+      &quot;preferredVerbs&quot;: [
+        &quot;新增&quot;,
+        &quot;修复&quot;,
+        &quot;优化&quot;,
+        &quot;调整&quot;,
+        &quot;移除&quot;
+      ],
+      &quot;panelExamples&quot;: {
+        &quot;flow&quot;: {
+          &quot;summary&quot;: &quot;新增入口&quot;,
+          &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+        },
+        &quot;function&quot;: {
+          &quot;summary&quot;: &quot;优化说明&quot;,
+          &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+        },
+        &quot;guardrail&quot;: {
+          &quot;summary&quot;: &quot;调整边界&quot;,
+          &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+        },
+        &quot;risk&quot;: {
+          &quot;summary&quot;: &quot;修复误判&quot;,
+          &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+        }
+      }
+    },
     &quot;expectedDataShape&quot;: {
       &quot;reviewPresentation&quot;: {
+        &quot;diagram&quot;: {
+          &quot;type&quot;: &quot;map&quot;,
+          &quot;note&quot;: &quot;默认用关系图；只有确认为线性流程时改为 flow，并用 flowEdges 明确哪些节点有箭头。&quot;
+        },
         &quot;mapNodes&quot;: {
           &quot;problem&quot;: {
             &quot;title&quot;: &quot;问题定义&quot;,
@@ -715,9 +817,54 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
         },
         &quot;flowNodes&quot;: [
           {
+            &quot;id&quot;: &quot;step1&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step2&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step3&quot;,
             &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
           }
-        ]
+        ],
+        &quot;flowEdges&quot;: [
+          {
+            &quot;from&quot;: &quot;step1&quot;,
+            &quot;to&quot;: &quot;step2&quot;
+          },
+          {
+            &quot;from&quot;: &quot;step2&quot;,
+            &quot;to&quot;: &quot;step3&quot;
+          }
+        ],
+        &quot;panels&quot;: {
+          &quot;flow&quot;: [
+            {
+              &quot;summary&quot;: &quot;新增入口&quot;,
+              &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+            }
+          ],
+          &quot;function&quot;: [
+            {
+              &quot;summary&quot;: &quot;优化说明&quot;,
+              &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+            }
+          ],
+          &quot;guardrail&quot;: [
+            {
+              &quot;summary&quot;: &quot;调整边界&quot;,
+              &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+            }
+          ],
+          &quot;risk&quot;: [
+            {
+              &quot;summary&quot;: &quot;修复误判&quot;,
+              &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+            }
+          ]
+        }
       }
     },
     &quot;rules&quot;: [
@@ -740,14 +887,14 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
         &quot;area&quot;: &quot;四个评审卡片&quot;,
         &quot;target&quot;: &quot;重点摘要胶囊&quot;,
         &quot;maxChars&quot;: 15,
-        &quot;action&quot;: &quot;请重写成短标签，保留结论，不要堆叠长句。&quot;
+        &quot;action&quot;: &quot;请重写成短标签，优先使用 新增 / 修复 / 优化 / 调整 / 移除 这类用户能一眼看懂的动作词，再补必要对象。&quot;
       },
       {
         &quot;id&quot;: &quot;review-panel-detail-format&quot;,
         &quot;area&quot;: &quot;四个评审卡片&quot;,
         &quot;target&quot;: &quot;明细分点&quot;,
         &quot;format&quot;: &quot;- **摘要内容**：明细一句话&quot;,
-        &quot;action&quot;: &quot;请把每个明细改写为“加粗短摘要 + 一句话说明”，方便用户先扫重点再读细节。&quot;
+        &quot;action&quot;: &quot;请写入 reviewPresentation.panels.&lt;kind&gt;[]，把每个明细改写为“加粗短摘要 + 一句话说明”，短摘要优先使用 新增 / 修复 / 优化 / 调整 / 移除。&quot;
       }
     ]
   },
@@ -756,6 +903,7 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;问题定义卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.problem.text&quot;,
       &quot;currentChars&quot;: 67,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;修复 OpenPrd verify 边界，避免外部参考目录和 reference discovery 污染主验证，并刷新历史项目生成物&quot;,
@@ -765,6 +913,7 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;范围卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.scope.text&quot;,
       &quot;currentChars&quot;: 45,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;调整 run context 与 run verify 对 discovery 的纳入规则&quot;,
@@ -774,6 +923,7 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;流程卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.flow.text&quot;,
       &quot;currentChars&quot;: 184,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external&quot;,
@@ -783,84 +933,65 @@ openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;风险卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.risk.text&quot;,
       &quot;currentChars&quot;: 76,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充&quot;,
       &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
     },
     {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 49,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;reference discovery 仍然混入 run context 或 run verify&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 62,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 30,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;fleet 更新后历史项目仍保留旧的 verify 噪音行为&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 1&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[0]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external。&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[0]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 2&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[1]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;reference discovery 仍然混入 run context 或 run verify&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[1]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 3&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[2]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[2]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 4&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[3]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;fleet 更新后历史项目仍保留旧的 verify 噪音行为&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[3]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;开放问题与风险&quot;,
       &quot;target&quot;: &quot;明细 1&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.risk[0]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.risk[0]，格式例如 { \&quot;summary\&quot;: \&quot;修复误判\&quot;, \&quot;detail\&quot;: \&quot;避免把实现授权写成再次索取确认。\&quot; }。&quot;
     }
   ],
-  &quot;exportedAt&quot;: &quot;2026-05-28T02:43:58.386Z&quot;
+  &quot;exportedAt&quot;: &quot;2026-06-05T00:44:22.419Z&quot;
 }" title="openprd review . --mark needs-revision --version &#39;v0001&#39; --digest &#39;dc988d7a94c07d2a8070968a71ddacffb374eaeee12aa85eb93231e06dd7b077&#39; --work-unit &#39;wu-20260524015648-6d33ded7&#39; --notes &#39;说明需要调整的点&#39;">
           需要调整
         </button>
-        <button type="button" class="review-bottom-action confirm" data-copy-value="OpenPrD Review: 认可方案
+        <button type="button" class="review-bottom-action confirm" data-copy-value="OpenPrD Review: 认可并继续下一步
+
+当前稳定评审稿 v0001已确认。请先记录这版稳定评审稿，并继续当前 OpenPrd 下一步。若 review 后 tasks 已就绪但还需要执行授权，请直接展示执行确认清单，不要再泛泛确认。
 
 命令:
 
@@ -881,6 +1012,34 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
     &quot;确认主流程与失败路径&quot;,
     &quot;确认关键风险与开放问题&quot;
   ],
+  &quot;summaryStyle&quot;: {
+    &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+    &quot;preferredVerbs&quot;: [
+      &quot;新增&quot;,
+      &quot;修复&quot;,
+      &quot;优化&quot;,
+      &quot;调整&quot;,
+      &quot;移除&quot;
+    ],
+    &quot;panelExamples&quot;: {
+      &quot;flow&quot;: {
+        &quot;summary&quot;: &quot;新增入口&quot;,
+        &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+      },
+      &quot;function&quot;: {
+        &quot;summary&quot;: &quot;优化说明&quot;,
+        &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+      },
+      &quot;guardrail&quot;: {
+        &quot;summary&quot;: &quot;调整边界&quot;,
+        &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+      },
+      &quot;risk&quot;: {
+        &quot;summary&quot;: &quot;修复误判&quot;,
+        &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+      }
+    }
+  },
   &quot;sectionKeys&quot;: [
     &quot;meta&quot;,
     &quot;problem&quot;,
@@ -897,8 +1056,40 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
   ],
   &quot;presentationContract&quot;: {
     &quot;intent&quot;: &quot;这些限制用于反馈给 Agent 重新概括，不由 HTML 模板截断原文。&quot;,
+    &quot;summaryStyle&quot;: {
+      &quot;perspective&quot;: &quot;从用户可感知变化出发，优先写用户现在能做什么、会看到什么、哪个问题被修好。&quot;,
+      &quot;preferredVerbs&quot;: [
+        &quot;新增&quot;,
+        &quot;修复&quot;,
+        &quot;优化&quot;,
+        &quot;调整&quot;,
+        &quot;移除&quot;
+      ],
+      &quot;panelExamples&quot;: {
+        &quot;flow&quot;: {
+          &quot;summary&quot;: &quot;新增入口&quot;,
+          &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+        },
+        &quot;function&quot;: {
+          &quot;summary&quot;: &quot;优化说明&quot;,
+          &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+        },
+        &quot;guardrail&quot;: {
+          &quot;summary&quot;: &quot;调整边界&quot;,
+          &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+        },
+        &quot;risk&quot;: {
+          &quot;summary&quot;: &quot;修复误判&quot;,
+          &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+        }
+      }
+    },
     &quot;expectedDataShape&quot;: {
       &quot;reviewPresentation&quot;: {
+        &quot;diagram&quot;: {
+          &quot;type&quot;: &quot;map&quot;,
+          &quot;note&quot;: &quot;默认用关系图；只有确认为线性流程时改为 flow，并用 flowEdges 明确哪些节点有箭头。&quot;
+        },
         &quot;mapNodes&quot;: {
           &quot;problem&quot;: {
             &quot;title&quot;: &quot;问题定义&quot;,
@@ -923,9 +1114,54 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
         },
         &quot;flowNodes&quot;: [
           {
+            &quot;id&quot;: &quot;step1&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step2&quot;,
+            &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
+          },
+          {
+            &quot;id&quot;: &quot;step3&quot;,
             &quot;text&quot;: &quot;30 字以内的流程卡片正文&quot;
           }
-        ]
+        ],
+        &quot;flowEdges&quot;: [
+          {
+            &quot;from&quot;: &quot;step1&quot;,
+            &quot;to&quot;: &quot;step2&quot;
+          },
+          {
+            &quot;from&quot;: &quot;step2&quot;,
+            &quot;to&quot;: &quot;step3&quot;
+          }
+        ],
+        &quot;panels&quot;: {
+          &quot;flow&quot;: [
+            {
+              &quot;summary&quot;: &quot;新增入口&quot;,
+              &quot;detail&quot;: &quot;用户现在可以直接进入对应流程，不用再自己找路径。&quot;
+            }
+          ],
+          &quot;function&quot;: [
+            {
+              &quot;summary&quot;: &quot;优化说明&quot;,
+              &quot;detail&quot;: &quot;用户先看到新增、修复、优化这类短摘要，再决定是否继续细读。&quot;
+            }
+          ],
+          &quot;guardrail&quot;: [
+            {
+              &quot;summary&quot;: &quot;调整边界&quot;,
+              &quot;detail&quot;: &quot;只保留用户需要知道的限制、影响和下一步。&quot;
+            }
+          ],
+          &quot;risk&quot;: [
+            {
+              &quot;summary&quot;: &quot;修复误判&quot;,
+              &quot;detail&quot;: &quot;避免把实现授权写成再次索取确认。&quot;
+            }
+          ]
+        }
       }
     },
     &quot;rules&quot;: [
@@ -948,14 +1184,14 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
         &quot;area&quot;: &quot;四个评审卡片&quot;,
         &quot;target&quot;: &quot;重点摘要胶囊&quot;,
         &quot;maxChars&quot;: 15,
-        &quot;action&quot;: &quot;请重写成短标签，保留结论，不要堆叠长句。&quot;
+        &quot;action&quot;: &quot;请重写成短标签，优先使用 新增 / 修复 / 优化 / 调整 / 移除 这类用户能一眼看懂的动作词，再补必要对象。&quot;
       },
       {
         &quot;id&quot;: &quot;review-panel-detail-format&quot;,
         &quot;area&quot;: &quot;四个评审卡片&quot;,
         &quot;target&quot;: &quot;明细分点&quot;,
         &quot;format&quot;: &quot;- **摘要内容**：明细一句话&quot;,
-        &quot;action&quot;: &quot;请把每个明细改写为“加粗短摘要 + 一句话说明”，方便用户先扫重点再读细节。&quot;
+        &quot;action&quot;: &quot;请写入 reviewPresentation.panels.&lt;kind&gt;[]，把每个明细改写为“加粗短摘要 + 一句话说明”，短摘要优先使用 新增 / 修复 / 优化 / 调整 / 移除。&quot;
       }
     ]
   },
@@ -964,6 +1200,7 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;问题定义卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.problem.text&quot;,
       &quot;currentChars&quot;: 67,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;修复 OpenPrd verify 边界，避免外部参考目录和 reference discovery 污染主验证，并刷新历史项目生成物&quot;,
@@ -973,6 +1210,7 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;范围卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.scope.text&quot;,
       &quot;currentChars&quot;: 45,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;调整 run context 与 run verify 对 discovery 的纳入规则&quot;,
@@ -982,6 +1220,7 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;流程卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.flow.text&quot;,
       &quot;currentChars&quot;: 184,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external&quot;,
@@ -991,82 +1230,61 @@ openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d
       &quot;ruleId&quot;: &quot;review-map-card-text&quot;,
       &quot;area&quot;: &quot;需求关系图&quot;,
       &quot;target&quot;: &quot;风险卡片正文&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.mapNodes.risk.text&quot;,
       &quot;currentChars&quot;: 76,
       &quot;maxChars&quot;: 30,
       &quot;currentText&quot;: &quot;本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充&quot;,
       &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
     },
     {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 49,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;reference discovery 仍然混入 run context 或 run verify&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 62,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
-      &quot;ruleId&quot;: &quot;review-highlight-chip&quot;,
-      &quot;area&quot;: &quot;评审卡片重点摘要&quot;,
-      &quot;target&quot;: &quot;重点摘要胶囊&quot;,
-      &quot;currentChars&quot;: 30,
-      &quot;maxChars&quot;: 15,
-      &quot;currentText&quot;: &quot;fleet 更新后历史项目仍保留旧的 verify 噪音行为&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新提炼这段内容，生成更短、更完整的表达；不要由 HTML 模板直接裁剪。&quot;
-    },
-    {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 1&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[0]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;维护者运行 openprd run . --context 或 openprd run . --verify 时，只看到当前项目主验证状态；仓库中存在 research、toolkit-sources、marketplace-candidates 等参考目录时，默认不会被当成本项目源码说明书缺口直接淹没结果；维护者可以继续按需显式 classify-external。&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[0]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 2&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[1]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;reference discovery 仍然混入 run context 或 run verify&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[1]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 3&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[2]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;standards verify 继续被 research 或 toolkit-sources 之类参考目录的说明书缺口淹没&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[2]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;主流程与边界情况&quot;,
       &quot;target&quot;: &quot;明细 4&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.flow[3]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;fleet 更新后历史项目仍保留旧的 verify 噪音行为&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.flow[3]，格式例如 { \&quot;summary\&quot;: \&quot;新增入口\&quot;, \&quot;detail\&quot;: \&quot;用户现在可以直接进入对应流程，不用再自己找路径。\&quot; }。&quot;
     },
     {
       &quot;ruleId&quot;: &quot;review-panel-detail-format&quot;,
       &quot;area&quot;: &quot;开放问题与风险&quot;,
       &quot;target&quot;: &quot;明细 1&quot;,
+      &quot;jsonPath&quot;: &quot;reviewPresentation.panels.risk[0]&quot;,
       &quot;expectedFormat&quot;: &quot;- **摘要内容**：明细一句话&quot;,
       &quot;currentText&quot;: &quot;本次只收敛默认边界，不自动猜测每个历史项目全部 external reference 清单；如果某些项目还需要更细的目录级归类，仍由维护者显式确认和补充&quot;,
-      &quot;action&quot;: &quot;请让 Agent 重新写成“**短摘要**：一句明细”，摘要用于扫读，明细保留完整判断。&quot;
+      &quot;action&quot;: &quot;请写入 reviewPresentation.panels.risk[0]，格式例如 { \&quot;summary\&quot;: \&quot;修复误判\&quot;, \&quot;detail\&quot;: \&quot;避免把实现授权写成再次索取确认。\&quot; }。&quot;
     }
   ],
-  &quot;exportedAt&quot;: &quot;2026-05-28T02:43:58.386Z&quot;
+  &quot;exportedAt&quot;: &quot;2026-06-05T00:44:22.419Z&quot;
 }" title="openprd review . --mark confirmed --version &#39;v0001&#39; --digest &#39;dc988d7a94c07d2a8070968a71ddacffb374eaeee12aa85eb93231e06dd7b077&#39; --work-unit &#39;wu-20260524015648-6d33ded7&#39;">
-          认可方案
+          认可并继续
         </button>
       </div>
     </nav>

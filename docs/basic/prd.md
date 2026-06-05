@@ -39,7 +39,7 @@ OpenPrd 的需求初始化默认不是重问卷，而是先建立一层轻量的
 - 包含：大界面改动的实现前视觉方案评审，要求 Agent 使用 Codex Computer Use 截取产品内当前功能截图，再用 Codex 原生 Image 2 基于截图生成至少 3 个不同设计方向，并横向拼接成带 1/2/3 序号的大图供用户确认。
 - 包含：界面视觉对比工具，通过 `openprd visual-compare --reference <效果图> --actual <实现截图>` 把两张图合成带“效果图 / 实现截图”简体中文标签的左右对比图；没有参考图但改动界面时，通过 `openprd visual-compare --before <修改前截图> --after <修改后截图>` 合成带“修改前 / 修改后”标签的自检图。默认输出 JPG 到 `.openprd/harness/visual-reviews/`；该工具只用于实现阶段视觉证据，不能替代实现前效果图方向评审。
 - 包含：研发期 touched code files 标准层，通过 `openprd dev-check` 或 `scripts/openprd-dev-check.mjs` 返回代码文件行数、状态和下一步动作建议；需要关注的文件会形成“后续建议”表格行，并按 🔴 → 🟠 → 🟡 的关注程度排序。
-- 包含：自我成长标准层，通过 `.openprd/growth/` 和 `openprd grow --review|--apply|--reject` 管理执行中发现的代码扩展名、豁免规则、命令习惯、项目约定和 user-local 偏好候选；工具识别补全和减少重复打扰的高置信低风险项可自动固化，用户偏好、项目协作规矩和 OpenPrd 默认行为留到收工复盘确认。
+- 包含：自我成长标准层，通过 `.openprd/growth/` 和 `openprd grow --review|--apply|--reject` 管理执行中发现的代码扩展名、豁免规则、命令习惯、项目约定和 user-local 偏好候选；代码扩展识别这类白名单工具补全可自动固化，用户偏好、项目协作规矩和 OpenPrd 默认行为留到收工复盘确认。
 - 包含：benchmark 信源观察层，通过 `openprd benchmark observe` 把被用户采纳的高质量外部来源写入 candidate，保留累计采纳证据，并按最近 7 天滚动统计决定是否提示用户 approve；达到阈值后只提示用户 approve，不自动进入 approved registry。
 - 包含：OpenPrd 自身维护时的 grow-aware 配置自检，覆盖新增或修改阈值、规则、识别、豁免、命令别名、环境差异、用户偏好和策略开关；高置信可成长时默认纳入 grow，不确定时主动询问用户。
 - 包含：PRD 业务护栏层，在命中免费、额度、用量、AI 生成、模型调用或第三方成本信号时，要求补齐成本来源、额度限制、滥用防护、监控信号、报警阈值和止损动作。
@@ -60,7 +60,7 @@ OpenPrd 的需求初始化默认不是重问卷，而是先建立一层轻量的
 - 大界面改动进入实现前，Agent guidance 会要求先用 Codex Computer Use 获取产品内当前功能截图，再用 Image 2 做 3 方向效果图，并把结果拼成横向评审大图给用户确认；未确认方向前不得进入大 UI 实现。
 - 界面、页面、视觉、样式或前端体验任务在已有参考图并进入实现阶段时，会先截实现图并运行 `openprd visual-compare --reference/--actual`；输出图左侧标注“效果图”、右侧标注“实现截图”。无参考图但改动界面时，Agent 会在动手前截修改前截图，完成后用同一入口、视口、账号和数据状态截修改后截图，并运行 `openprd visual-compare --before/--after`；输出图左侧标注“修改前”、右侧标注“修改后”。Agent 需查看合成图并继续复刻或自检到无明显差异/漂移后才宣称视觉完成。
 - 明确实现类请求在新增或修改代码文件前后，可以运行 `openprd dev-check <path> <file...>` 获取改动文件的关注程度和下一步建议；需要关注的文件必须在最终回复以 **后续建议** 为标题，用 Markdown 表格说明影响位置、关注程度、规模信号、为什么需要关注、本次处理和后续建议。
-- 当 dev-check 识别出未知代码扩展名时，本次检查会按候选代码文件给出行数建议；高置信代码扩展名会自动补齐识别规则并记录证据，低置信或非工具识别类候选通过 `openprd grow --review` 在收工时集中确认。未确认候选不得被描述为已生效规则。
+- 当 dev-check 识别出未知代码扩展名时，本次检查会按候选代码文件给出行数建议，并自动补齐识别规则、记录证据；非工具识别类候选通过 `openprd grow --review` 在收工时集中确认。未确认候选不得被描述为已生效规则。
 - 当同一规范化外部信源被 `benchmark observe` 记录到采纳阈值时，`benchmark list` 和 `grow --review` 会给出 approve 建议；用户确认前该来源仍是 candidate，不能作为长期 approved benchmark 使用。
 - 修改 OpenPrd 本身且涉及配置类能力时，Agent 会说明该能力是否 grow-aware；高置信可成长的配置默认带候选类型、scope、review/apply 行为，不确定时主动询问用户。
 - 命中消耗型成本风险的 PRD 在业务护栏字段缺失时会回到 `clarify-user`，不会直接进入 freeze。

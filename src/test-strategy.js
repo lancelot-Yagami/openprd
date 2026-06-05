@@ -66,6 +66,11 @@ function includesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+const WEAPP_MENTION_PATTERNS = [/weapp|微信小程序|小程序|微信开发者工具/];
+const WEAPP_VALIDATION_ACTION_PATTERNS = [
+  /测试|验证|实测|复现|截图|日志|抓日志|抓包|网络请求|network|运行态|开发者工具自动化|从\s*0\s*到\s*1|冷启动|全流程/,
+];
+
 function firstKnown(values, allowed, fallback) {
   return values.find((value) => allowed.includes(value)) ?? fallback;
 }
@@ -129,13 +134,13 @@ export function inferTestStrategyForTask(task = {}) {
     };
   }
 
-  if (includesAny(text, [/weapp|微信小程序|小程序|微信开发者工具/])) {
+  if (includesAny(text, WEAPP_MENTION_PATTERNS) && includesAny(text, WEAPP_VALIDATION_ACTION_PATTERNS)) {
     return {
       layers: ['integration', 'weapp'],
       size: 'large',
       scope: 'weapp-runtime',
-      evidencePlan: 'weapp-dev-mcp 截图、日志或网络请求证据 + 本任务 verify 命令',
-      upgradeReason: '触达小程序运行态，需要本地开发者工具实测证据',
+      evidencePlan: '小程序运行态截图、日志、网络请求或其他本地验证证据 + 本任务 verify 命令',
+      upgradeReason: '明确要求小程序运行态证据，需要本地运行态验证',
       inferred: true,
     };
   }
@@ -300,7 +305,7 @@ export function summarizeTaskTestStrategies(tasks = []) {
     taskStrategies.push({
       id: task.id ?? null,
       title: task.title ?? null,
-      done: Boolean(task.checked),
+      done: Boolean(task.checked ?? task.done),
       source: task.relativePath ?? task.source ?? null,
       line: task.lineNumber ?? task.line ?? null,
       layers: strategy.layers,

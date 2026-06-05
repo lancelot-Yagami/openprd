@@ -189,14 +189,20 @@ async function doctorWorkspace(projectRoot, options = {}) {
       packageManager: options.packageManager,
     })
     : null;
-  const standards = await checkStandardsWorkspace(projectRoot).catch((error) => ({
+  const standards = await checkStandardsWorkspace(projectRoot, {
+    sourceManuals: options.sourceManuals,
+    docsContent: options.docsContent,
+  }).catch((error) => ({
     ok: false,
     errors: [error instanceof Error ? error.message : String(error)],
     warnings: [],
     checks: [],
     docsRoot: path.join('docs', 'basic'),
   }));
-  const validation = await validateWorkspace(projectRoot)
+  const validation = await validateWorkspace(projectRoot, {
+    sourceManuals: options.sourceManuals,
+    docsContent: options.docsContent,
+  })
     .then(({ report }) => report)
     .catch((error) => ({
       valid: false,
@@ -631,6 +637,7 @@ async function generateOpenSpecChangeWorkspace(projectRoot, options = {}) {
     `验证: ${validation.valid ? '通过' : '失败'}。`,
   ]);
   await syncSessionBindingFromChange(projectRoot, result.changeId, {
+    sessionId: ws.data.currentSessionId ?? null,
     title: snapshot.title ?? null,
     versionId: snapshot.versionId ?? null,
     digest: snapshot.digest ?? null,

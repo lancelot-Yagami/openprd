@@ -6,13 +6,25 @@ import path from 'node:path';
 import sharp from 'sharp';
 
 import { buildReviewExportPayload, renderReviewArtifact } from '../../src/html-artifacts.js';
-import {
+import { addBenchmarkWorkspace, advanceOpenSpecTaskWorkspace, applyGrowthCandidateWorkspace, applyOpenPrdChangeWorkspace, approveBenchmarkWorkspace, archiveOpenPrdChangeWorkspace, captureWorkspace, checkDevelopmentStandardsWorkspace, checkStandardsWorkspace, clarifyWorkspace, classifyExternalReferenceWorkspace, classifyWorkspace, diagramWorkspace, diffWorkspace, doctorWorkspace, finishLoopWorkspace, fleetWorkspace, freezeWorkspace, generateLearningReviewWorkspace, generateOpenSpecChangeWorkspace, handoffWorkspace, historyWorkspace, initLoopWorkspace, initQualityWorkspace, initWorkspace, interviewWorkspace, learnQualityWorkspace, listAcceptedSpecsWorkspace, listBenchmarkWorkspace, listOpenPrdChangesWorkspace, listOpenSpecTaskWorkspace, main, nextLoopWorkspace, nextWorkspace, observeBenchmarkSourceWorkspace, openspecDiscoveryWorkspace, planLoopWorkspace, playgroundWorkspace, promptLoopWorkspace, releaseWorkspace, reviewGrowthWorkspace, reviewPresentationWorkspace, reviewWorkspace, runLoopWorkspace, runWorkspace, setLearningReviewModeWorkspace, setupAgentIntegrationWorkspace, statusLoopWorkspace, synthesizeWorkspace as synthesizeWorkspaceBase, updateAgentIntegrationWorkspace, validateOpenSpecChangeWorkspace, validateWorkspace, verifyBenchmarkWorkspace, verifyLoopWorkspace, verifyQualityWorkspace, visualCompareWorkspace } from '../../src/openprd.js';
+import { archiveKnowledgeCandidate, listKnowledgeCandidates, rejectKnowledgeCandidate, restoreKnowledgeCandidate } from '../../src/knowledge.js';
+import { checkCodexCliHealth, ensureCodexCliReady } from '../../src/codex-runtime.js';
+import { createRunWorkspace } from '../../src/run-harness.js';
+
+export {
+  assert,
+  spawnSync,
+  fs,
+  os,
+  path,
+  sharp,
+  buildReviewExportPayload,
+  renderReviewArtifact,
   addBenchmarkWorkspace,
   advanceOpenSpecTaskWorkspace,
   applyGrowthCandidateWorkspace,
   applyOpenPrdChangeWorkspace,
   approveBenchmarkWorkspace,
-  archiveKnowledgeCandidate,
   archiveOpenPrdChangeWorkspace,
   captureWorkspace,
   checkDevelopmentStandardsWorkspace,
@@ -37,7 +49,6 @@ import {
   learnQualityWorkspace,
   listAcceptedSpecsWorkspace,
   listBenchmarkWorkspace,
-  listKnowledgeCandidates,
   listOpenPrdChangesWorkspace,
   listOpenSpecTaskWorkspace,
   main,
@@ -48,9 +59,7 @@ import {
   planLoopWorkspace,
   playgroundWorkspace,
   promptLoopWorkspace,
-  rejectKnowledgeCandidate,
   releaseWorkspace,
-  restoreKnowledgeCandidate,
   reviewGrowthWorkspace,
   reviewPresentationWorkspace,
   reviewWorkspace,
@@ -59,7 +68,7 @@ import {
   setLearningReviewModeWorkspace,
   setupAgentIntegrationWorkspace,
   statusLoopWorkspace,
-  synthesizeWorkspace as synthesizeWorkspaceBase,
+  synthesizeWorkspaceBase,
   updateAgentIntegrationWorkspace,
   validateOpenSpecChangeWorkspace,
   validateWorkspace,
@@ -67,17 +76,22 @@ import {
   verifyLoopWorkspace,
   verifyQualityWorkspace,
   visualCompareWorkspace,
-} from '../../src/openprd.js';
-import { checkCodexCliHealth, ensureCodexCliReady } from '../../src/codex-runtime.js';
-import { createRunWorkspace } from '../../src/run-harness.js';
+  archiveKnowledgeCandidate,
+  listKnowledgeCandidates,
+  rejectKnowledgeCandidate,
+  restoreKnowledgeCandidate,
+  checkCodexCliHealth,
+  ensureCodexCliReady,
+  createRunWorkspace,
+};
 
-const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(apply_patch|Write|Edit)$';
-const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|apply_patch|Write|Edit)$';
-const TEST_OPENPRD_HOME = path.join(os.tmpdir(), 'openprd-test-home');
+export const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(apply_patch|Write|Edit)$';
+export const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|apply_patch|Write|Edit)$';
+export const TEST_OPENPRD_HOME = path.join(os.tmpdir(), 'openprd-test-home');
 
 process.env.OPENPRD_HOME = TEST_OPENPRD_HOME;
 
-function hasTomlFeatureKey(text, key) {
+export function hasTomlFeatureKey(text, key) {
   const lines = text.split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === '[features]');
   if (start < 0) return false;
@@ -89,21 +103,21 @@ function hasTomlFeatureKey(text, key) {
   return false;
 }
 
-function findOpenPrdHookGroup(groups) {
+export function findOpenPrdHookGroup(groups) {
   return groups?.find((group) => group.hooks?.some((hook) => hook.command.includes('openprd-hook.mjs')));
 }
 
-async function makeTempProject() {
+export async function makeTempProject() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openprd-test-'));
   await fs.mkdir(path.join(dir, 'project'), { recursive: true });
   return path.join(dir, 'project');
 }
 
-async function pathExists(filePath) {
+export async function pathExists(filePath) {
   return fs.stat(filePath).then(() => true, () => false);
 }
 
-async function readJsonl(filePath) {
+export async function readJsonl(filePath) {
   const text = await fs.readFile(filePath, 'utf8');
   return text
     .split(/\r?\n/)
@@ -112,107 +126,175 @@ async function readJsonl(filePath) {
     .map((line) => JSON.parse(line));
 }
 
-async function writeAnswersFile(project, filename, payload) {
+export async function writeAnswersFile(project, filename, payload) {
   const filePath = path.join(project, filename);
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
   return filePath;
 }
 
-async function writeConcreteBasicDocs(project) {
-  const docsRoot = path.join(project, 'docs', 'basic');
-  await fs.mkdir(docsRoot, { recursive: true });
-  const docs = {
-    'file-structure.md': '# 文件结构\n\n## 核心文件\n\n- `src/index.js`: 示例入口。\n',
-    'app-flow.md': '# 应用流程\n\n## 核心流程\n\n用户发起请求，系统处理并返回结果。\n',
-    'prd.md': '# PRD\n\n## 目标\n\n交付可验证的最小需求闭环。\n',
-    'frontend-guidelines.md': '# 前端准则\n\n## 界面规则\n\n界面保持清晰、可读、可验证。\n',
-    'backend-structure.md': '# 后端结构\n\n## 模块\n\n服务层负责业务处理，存储层负责数据持久化。\n',
-    'tech-stack.md': '# 技术栈\n\n## 运行时\n\nNode.js 与项目本地脚本。\n',
-  };
-  await Promise.all(Object.entries(docs).map(([filename, content]) => fs.writeFile(path.join(docsRoot, filename), content)));
+export async function writeConcreteBasicDocs(project, sourceFile = 'src/app.js') {
+  const docs = [
+    ['file-structure.md', '# 项目文件结构\n\n## 项目定位\n\n测试项目。\n\n## 核心目录\n\n- `src/`: 示例源码。\n\n## 文件组织规则\n\n- 源码放在 `src/`。\n\n## 维护规则\n\n- 修改源码后更新说明书。\n'],
+    ['app-flow.md', '# 产品流程说明\n\n## 核心流程\n\n用户运行示例。\n\n## 用户路径\n\n- 打开项目并执行命令。\n\n## 状态变化\n\n- 示例从未运行到已运行。\n\n## 维护规则\n\n- 流程变化后更新本文档。\n'],
+    ['prd.md', '# 产品逻辑说明\n\n## 问题与目标\n\n提供最小示例。\n\n## 用户故事\n\n- 用户可以运行示例。\n\n## 功能范围\n\n- 示例入口。\n\n## 验收标准\n\n- 命令可执行。\n\n## 维护规则\n\n- 需求变化后更新本文档。\n'],
+    ['frontend-guidelines.md', '# 前端开发规范\n\n## 适用范围\n\n无前端界面。\n\n## 界面结构\n\n- 当前没有页面。\n\n## 交互规范\n\n- 新增界面后更新本文档。\n\n## 维护规则\n\n- 新增界面后更新本文档。\n'],
+    ['backend-structure.md', `# 后端架构设计\n\n## 适用范围\n\n示例脚本。\n\n## 服务边界\n\n- \`${sourceFile}\` 提供入口。\n\n## CLI 接入面\n\n- 当前通过 Node.js 测试脚本验证，不提供独立 CLI 子命令。\n\n## API 接入面\n\n- 当前不提供 HTTP 或 RPC API。\n\n## 数据流\n\n- 无外部数据。\n\n## 维护规则\n\n- 模块或 CLI/API 接入面变化后更新本文档。\n`],
+    ['tech-stack.md', '# 项目技术栈\n\n## 运行环境\n\n- Node.js。\n\n## 核心依赖\n\n- 测试使用 Node.js 内置能力。\n\n## 工具链\n\n- `node --test`。\n\n## 维护规则\n\n- 依赖变化后更新本文档。\n'],
+  ];
+  for (const [file, text] of docs) {
+    await fs.writeFile(path.join(project, 'docs', 'basic', file), text);
+  }
 }
 
-async function writeSourceManual(filePath) {
-  const manual = [
-    '/*',
-    '核心功能: 提供测试用源文件职责说明。',
-    '输入: 测试调用方传入的数据。',
-    '输出: 可断言的测试结果。',
-    '定位: 用于 OpenPrd standards 测试。',
-    '依赖: Node.js 标准库。',
-    '维护规则: 修改职责时同步更新说明。',
-    '*/',
-    '',
-  ].join('\n');
-  const existing = await fs.readFile(filePath, 'utf8').catch(() => '');
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${manual}${existing}`);
-}
-
-async function writeFolderManual(folderPath) {
-  await fs.mkdir(folderPath, { recursive: true });
-  const folderName = path.basename(folderPath);
-  const filePath = path.join(folderPath, `${folderName}_README.md`);
+export async function writeSourceManual(filePath, code) {
   await fs.writeFile(filePath, [
-    `# ${folderName}`,
+    '/*',
+    '## 核心功能',
+    '提供测试项目源码入口。',
+    '## 输入',
+    '调用方传入测试请求对象。',
+    '## 输出',
+    '导出测试函数或常量。',
+    '## 定位',
+    '位于测试项目源码目录。',
+    '## 依赖',
+    '仅依赖 Node.js 运行时。',
+    '## 维护规则',
+    '修改行为后同步更新说明书。',
+    '*/',
+    code,
+    '',
+  ].join('\n'));
+}
+
+export async function writeFolderManual(dirPath, project, label) {
+  await fs.writeFile(path.join(dirPath, `${path.basename(project)}_${label}_README.md`), [
+    `# ${label} 文件夹说明书`,
     '',
     '## 核心功能',
-    '承载测试用目录职责说明。',
+    '承载测试项目源码。',
     '',
     '## 输入',
-    '测试写入的源文件。',
+    '开发者编辑源码。',
     '',
     '## 输出',
-    '可被 standards 检查读取的说明。',
+    '对外提供测试入口。',
     '',
     '## 定位',
-    'OpenPrd standards 测试夹具。',
+    '项目源码目录。',
     '',
     '## 依赖',
-    '无外部依赖。',
+    'Node.js 运行时。',
     '',
     '## 维护规则',
-    '目录职责变化时同步更新。',
+    '新增源码后更新本说明书。',
     '',
   ].join('\n'));
-  return filePath;
 }
 
-async function writeFakeCodexBin(project) {
+export async function writeFakeCodexBin(project) {
   const binDir = path.join(project, 'fake-bin');
-  const binPath = path.join(binDir, 'codex');
   await fs.mkdir(binDir, { recursive: true });
-  await fs.writeFile(binPath, [
-    '#!/usr/bin/env node',
-    "if (process.argv.includes('--version')) {",
-    "  console.log('codex 0.0.0-test');",
-    '} else {',
-    "  console.log('fake codex');",
-    '}',
-    '',
-  ].join('\n'));
-  await fs.chmod(binPath, 0o755);
+  const codexPath = path.join(binDir, 'codex');
+  await fs.writeFile(codexPath, '#!/usr/bin/env sh\nprintf "codex 0.200.0\\n"\n');
+  await fs.chmod(codexPath, 0o755);
   return binDir;
 }
 
-function mergeReviewPresentation(base = {}, seed = {}) {
+export async function writeLoopProject(project, changeId = 'loop-demo') {
+  await initWorkspace(project, { templatePack: 'consumer' });
+  await writeConcreteBasicDocs(project, 'src/api/handler.js');
+  await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({
+    type: 'module',
+    scripts: {
+      test: 'node --test',
+      'test:smoke': 'node --test smoke.test.js',
+      'perf:k6': 'k6 run perf.js',
+    },
+    dependencies: {
+      '@opentelemetry/api': '^1.0.0',
+      pino: '^9.0.0',
+    },
+  }, null, 2)}\n`);
+  await fs.mkdir(path.join(project, 'src', 'api'), { recursive: true });
+  await writeSourceManual(path.join(project, 'src', 'api', 'handler.js'), 'export function handler(req) { console.log({ trace_id: req.trace_id, span_id: req.span_id, request_id: req.request_id, task_id: req.task_id, user_session_id: req.user_session_id, error_id: req.error_id }); }');
+  await writeFolderManual(path.join(project, 'src'), project, 'src');
+  await writeFolderManual(path.join(project, 'src', 'api'), project, 'api');
+  await fs.mkdir(path.join(project, 'test', 'fixtures'), { recursive: true });
+  await fs.writeFile(path.join(project, 'test', 'fixtures', 'extreme.json'), '{"items":[1,2,3]}\n');
+  await fs.mkdir(path.join(project, '.openprd', 'harness', 'test-reports'), { recursive: true });
+  await fs.writeFile(path.join(project, '.openprd', 'harness', 'test-reports', `${changeId}-smoke.md`), [
+    '# EVO loop smoke report',
+    '',
+    '- smoke: passed main flow',
+    '- feature coverage: no active change',
+    '- redaction: token redacted and pii masked',
+    '- performance: k6 baseline p95 stable',
+    '- extreme: large-data stress fixture passed',
+    '',
+  ].join('\n'));
+  const changeDir = path.join(project, 'openprd', 'changes', changeId);
+  await fs.mkdir(path.join(changeDir, 'specs', changeId), { recursive: true });
+  await fs.writeFile(path.join(changeDir, 'proposal.md'), [
+    '# Proposal',
+    '',
+    '## Why',
+    'Long-running agent work needs isolated task sessions.',
+    '',
+    '## What Changes',
+    `- \`${changeId}\`: Add a loop-driven implementation path.`,
+    '',
+    '## Impact',
+    'Agent execution gains deterministic task boundaries.',
+    '',
+  ].join('\n'));
+  await fs.writeFile(path.join(changeDir, 'specs', changeId, 'spec.md'), [
+    '# loop-demo 规格',
+    '',
+    '## ADDED Requirements',
+    '',
+    '### Requirement: Loop 任务会话保持隔离',
+    '每个实现任务都应在独立 Agent 会话中执行。',
+    '',
+    '#### Scenario: Agent 启动下一项任务',
+    '- **WHEN** 选中一个 Loop 任务',
+    '- **THEN** 提示词会把 Agent 限制在该单一任务内',
+    '',
+  ].join('\n'));
+  await fs.writeFile(path.join(changeDir, 'tasks.md'), [
+    '- [ ] T001.01 Prepare loop state',
+    '  - done: loop state is ready',
+    '  - verify: node -e "process.exit(0)"',
+    '- [ ] T001.02 Launch one-task session',
+    '  - deps: T001.01',
+    '  - done: one-task session is launchable',
+    '  - verify: node -e "process.exit(0)"',
+    '',
+  ].join('\n'));
+  return changeDir;
+}
+
+export function mergeReviewPresentation(base, seed) {
   return {
     ...base,
     ...seed,
     mapNodes: {
       ...(base.mapNodes ?? {}),
-      ...(seed.mapNodes ?? {}),
+      ...(seed?.mapNodes ?? {}),
     },
     panels: {
       ...(base.panels ?? {}),
-      ...(seed.panels ?? {}),
+      ...(seed?.panels ?? {}),
     },
-    flowNodes: seed.flowNodes ?? base.flowNodes,
+    diagram: seed?.diagram ?? base.diagram,
+    flowNodes: seed?.flowNodes ?? base.flowNodes,
+    flowEdges: seed?.flowEdges ?? base.flowEdges,
   };
 }
 
-function validReviewPresentation(seed = {}) {
-  const presentation = mergeReviewPresentation({
+export function validReviewPresentation(seed = {}) {
+  return mergeReviewPresentation({
+    diagram: { type: 'flow' },
     mapNodes: {
       problem: { title: '问题定义', text: '确认核心问题' },
       goal: { title: '目标', text: '确认目标结果' },
@@ -221,10 +303,15 @@ function validReviewPresentation(seed = {}) {
       risk: { title: '风险', text: '确认风险问题' },
     },
     flowNodes: [
-      { text: '确认入口' },
-      { text: '执行主步骤' },
-      { text: '校验结果' },
-      { text: '处理批量场景' },
+      { id: 'step1', text: '确认入口' },
+      { id: 'step2', text: '执行主步骤' },
+      { id: 'step3', text: '校验结果' },
+      { id: 'step4', text: '处理批量场景' },
+    ],
+    flowEdges: [
+      { from: 'step1', to: 'step2' },
+      { from: 'step2', to: 'step3' },
+      { from: 'step3', to: 'step4' },
     ],
     panels: {
       flow: [{ summary: '主线确认', detail: '用户能看懂入口、步骤和结果。' }],
@@ -233,17 +320,12 @@ function validReviewPresentation(seed = {}) {
       risk: [{ summary: '风险确认', detail: '开放问题和失败路径保留。' }],
     },
   }, seed);
-  if (!presentation.diagram && Array.isArray(seed.flowNodes)) {
-    presentation.diagram = { type: 'flow' };
-  }
-  return presentation;
 }
 
-async function writeValidReviewPresentation(project, versionId, seed = {}) {
+export async function writeValidReviewPresentation(project, versionId, seed = {}) {
   const presentationPath = path.join(project, `review-presentation-${versionId}.json`);
-  const reviewPresentation = validReviewPresentation(seed);
   await fs.writeFile(presentationPath, JSON.stringify({
-    reviewPresentation,
+    reviewPresentation: validReviewPresentation(seed),
   }, null, 2));
   const result = await reviewPresentationWorkspace(project, {
     version: versionId,
@@ -251,27 +333,23 @@ async function writeValidReviewPresentation(project, versionId, seed = {}) {
     write: true,
   });
   assert.equal(result.ok, true, JSON.stringify(result.presentationFeedback, null, 2));
-  return { ...result, reviewPresentation };
+  return result;
 }
 
-async function synthesizeWorkspace(project, options = {}) {
+export async function synthesizeWorkspace(project, options = {}) {
   const result = await synthesizeWorkspaceBase(project, options);
-  const written = await writeValidReviewPresentation(project, result.snapshot.versionId, result.snapshot.reviewPresentation ?? {});
+  const reviewResult = await writeValidReviewPresentation(project, result.snapshot.versionId, result.snapshot.reviewPresentation ?? {});
   return {
     ...result,
-    reviewArtifact: written.reviewEntryPath,
-    reviewEntryPath: written.reviewEntryPath,
-    reviewPath: written.reviewPath,
-    stableReviewArtifact: written.reviewPath,
+    reviewArtifact: reviewResult.reviewEntryPath,
+    stableReviewArtifact: reviewResult.reviewPath,
+    reviewPath: reviewResult.reviewPath,
+    reviewEntryPath: reviewResult.reviewEntryPath,
     reviewPresentationRequired: false,
-    snapshot: {
-      ...result.snapshot,
-      reviewPresentation: written.reviewPresentation,
-    },
   };
 }
 
-async function writeMinimalChange(project, changeId, {
+export async function writeMinimalChange(project, changeId, {
   title,
   requirementTitle = title,
   taskId = 'T001.01',
@@ -308,166 +386,3 @@ async function writeMinimalChange(project, changeId, {
   ].join('\n'));
   return changeDir;
 }
-
-async function writeLoopProject(project, changeId = 'loop-demo') {
-  await initWorkspace(project, { templatePack: 'agent' });
-  await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({
-    type: 'module',
-    scripts: {
-      'test:smoke': 'node --test smoke.test.js',
-    },
-  }, null, 2)}\n`);
-  await fs.mkdir(path.join(project, '.openprd', 'harness', 'test-reports'), { recursive: true });
-  await fs.writeFile(path.join(project, '.openprd', 'harness', 'test-reports', 'loop-smoke.md'), [
-    '# loop smoke evidence',
-    '',
-    '- smoke: passed loop task chain.',
-    '- feature coverage: loop tasks have verification commands.',
-    '',
-  ].join('\n'));
-  const changeDir = path.join(project, 'openprd', 'changes', changeId);
-  await fs.mkdir(path.join(changeDir, 'specs', changeId), { recursive: true });
-  await fs.writeFile(path.join(changeDir, 'proposal.md'), [
-    `# ${changeId}`,
-    '',
-    '## Why',
-    'Loop execution needs a small accepted task chain.',
-    '',
-    '## What Changes',
-    '- Prepare loop state.',
-    '- Launch one-task session.',
-    '',
-  ].join('\n'));
-  await fs.writeFile(path.join(changeDir, 'specs', changeId, 'spec.md'), [
-    `# ${changeId} spec`,
-    '',
-    '## ADDED Requirements',
-    '',
-    '### Requirement: Loop task chain is executable',
-    'The loop task chain must expose stable task handles and dependency order.',
-    '',
-    '#### 场景：Agent 推进首个 Loop 任务',
-    '- **当** Agent 验证第一个任务',
-    '- **则** Loop 可以标记完成并暴露第二个任务',
-    '',
-  ].join('\n'));
-  await fs.writeFile(path.join(changeDir, 'tasks.md'), [
-    '- [ ] T001.01 Prepare loop state',
-    '  - type: implementation',
-    '  - done: loop state is ready for one-task execution',
-    '  - verify: node -e "process.exit(0)"',
-    '  - execution-mode: parallel-workers',
-    '  - parallel-group: implementation',
-    '  - write-scope: src/**, test/**',
-    '  - owner-role: worker',
-    '  - local-verify: node -e "process.exit(0)"',
-    '  - integration-owner: main-agent',
-    '',
-    '- [ ] T001.02 Launch one-task session',
-    '  - deps: T001.01',
-    '  - type: implementation',
-    '  - done: one-task session launch is ready',
-    '  - verify: node -e "process.exit(0)"',
-    '  - execution-mode: parallel-workers',
-    '  - parallel-group: integration',
-    '  - write-scope: src/**, test/**',
-    '  - owner-role: worker',
-    '  - local-verify: node -e "process.exit(0)"',
-    '  - integration-owner: main-agent',
-    '',
-  ].join('\n'));
-  return changeDir;
-}
-
-export {
-  OPENPRD_GUARDED_WRITE_TOOL_MATCHER,
-  OPENPRD_LITE_WRITE_TOOL_MATCHER,
-  TEST_OPENPRD_HOME,
-  addBenchmarkWorkspace,
-  advanceOpenSpecTaskWorkspace,
-  applyGrowthCandidateWorkspace,
-  applyOpenPrdChangeWorkspace,
-  approveBenchmarkWorkspace,
-  archiveKnowledgeCandidate,
-  archiveOpenPrdChangeWorkspace,
-  assert,
-  buildReviewExportPayload,
-  captureWorkspace,
-  checkCodexCliHealth,
-  checkDevelopmentStandardsWorkspace,
-  checkStandardsWorkspace,
-  clarifyWorkspace,
-  classifyExternalReferenceWorkspace,
-  classifyWorkspace,
-  createRunWorkspace,
-  diagramWorkspace,
-  diffWorkspace,
-  doctorWorkspace,
-  ensureCodexCliReady,
-  findOpenPrdHookGroup,
-  finishLoopWorkspace,
-  fleetWorkspace,
-  freezeWorkspace,
-  fs,
-  generateLearningReviewWorkspace,
-  generateOpenSpecChangeWorkspace,
-  handoffWorkspace,
-  hasTomlFeatureKey,
-  historyWorkspace,
-  initLoopWorkspace,
-  initQualityWorkspace,
-  initWorkspace,
-  interviewWorkspace,
-  learnQualityWorkspace,
-  listAcceptedSpecsWorkspace,
-  listBenchmarkWorkspace,
-  listKnowledgeCandidates,
-  listOpenPrdChangesWorkspace,
-  listOpenSpecTaskWorkspace,
-  main,
-  makeTempProject,
-  mergeReviewPresentation,
-  nextLoopWorkspace,
-  nextWorkspace,
-  observeBenchmarkSourceWorkspace,
-  openspecDiscoveryWorkspace,
-  os,
-  path,
-  pathExists,
-  planLoopWorkspace,
-  playgroundWorkspace,
-  promptLoopWorkspace,
-  readJsonl,
-  rejectKnowledgeCandidate,
-  releaseWorkspace,
-  renderReviewArtifact,
-  restoreKnowledgeCandidate,
-  reviewGrowthWorkspace,
-  reviewPresentationWorkspace,
-  reviewWorkspace,
-  runLoopWorkspace,
-  runWorkspace,
-  setLearningReviewModeWorkspace,
-  setupAgentIntegrationWorkspace,
-  sharp,
-  spawnSync,
-  statusLoopWorkspace,
-  synthesizeWorkspace,
-  synthesizeWorkspaceBase,
-  updateAgentIntegrationWorkspace,
-  validReviewPresentation,
-  validateOpenSpecChangeWorkspace,
-  validateWorkspace,
-  verifyBenchmarkWorkspace,
-  verifyLoopWorkspace,
-  verifyQualityWorkspace,
-  visualCompareWorkspace,
-  writeAnswersFile,
-  writeConcreteBasicDocs,
-  writeFakeCodexBin,
-  writeFolderManual,
-  writeLoopProject,
-  writeMinimalChange,
-  writeSourceManual,
-  writeValidReviewPresentation,
-};

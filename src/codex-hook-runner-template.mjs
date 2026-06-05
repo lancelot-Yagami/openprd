@@ -852,8 +852,13 @@ function analyzePromptIntent(prompt) {
   const continuationSessionId = text.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i)?.[0] ?? null;
   const continuationTaskHandle = text.match(/\b[a-z0-9._-]+:T\d{3}\.\d{2}:[a-z0-9._-]+\b/i)?.[0] ?? null;
   const continuationWorkUnitId = text.match(/\bwu-[a-z0-9._-]+\b/i)?.[0] ?? null;
+  const promptReviewCommand = parseReviewMarkCommand(text);
   const continuationRequest = /(继续(这个|这条|当前)?(对话|任务|会话|记录|历史)?|续做|接着做|继续执行|继续推进)/i.test(text)
-    || Boolean(continuationSessionId || continuationTaskHandle || continuationWorkUnitId);
+    || Boolean(
+      continuationSessionId
+        || continuationTaskHandle
+        || (continuationWorkUnitId && !promptReviewCommand)
+    );
   const githubRepoPattern = /(?:https?:\/\/)?github\.com\/[^\s/]+\/[^\s/#?]+|(?:^|[\s(])[\w.-]+\/[\w.-]+(?=$|[\s)#?])/i;
   const internalOpenPrdExecution = /^#\s*OpenPrd\s+长程单任务执行会话/m.test(text)
     || /模式:\s*loop-run\b/i.test(text)
@@ -955,7 +960,12 @@ function analyzePromptIntent(prompt) {
     /别再确认/,
     /不需要再跟我确认/,
   ];
-  const promptReviewCommand = parseReviewMarkCommand(text);
+  const reviewContinuationPatterns = [
+    /认可方案并继续/,
+    /认可并继续/,
+    /继续当前\s*openprd\s*下一步/i,
+    /按当前\s*openprd\s*下一步继续/i,
+  ];
   const reviewConfirmPatterns = [
     /认可方案/,
     /确认(?:当前|这个|这版|该)?(?:PRD|评审稿|评审页|review|需求稿|版本)/i,
@@ -991,8 +1001,13 @@ function analyzePromptIntent(prompt) {
   const simpleConcrete = text.length <= 80
     && simpleConcretePatterns.some((pattern) => pattern.test(text))
     && !complexScopePatterns.some((pattern) => pattern.test(text));
-  const explicitExecution = internalOpenPrdExecution || continuationRequest || explicitExecutionPatterns.some((pattern) => pattern.test(text));
-  const implementationConfirmation = implementationConfirmationPatterns.some((pattern) => pattern.test(text));
+  const reviewContinuationRequested = reviewContinuationPatterns.some((pattern) => pattern.test(text));
+  const explicitExecution = internalOpenPrdExecution
+    || continuationRequest
+    || reviewContinuationRequested
+    || explicitExecutionPatterns.some((pattern) => pattern.test(text));
+  const implementationConfirmation = reviewContinuationRequested
+    || implementationConfirmationPatterns.some((pattern) => pattern.test(text));
   const noReviewRequested = noReviewRequestedPatterns.some((pattern) => pattern.test(text));
   const noConfirmationRequested = noConfirmationRequestedPatterns.some((pattern) => pattern.test(text));
   const reviewDecision = promptReviewCommand?.mark
@@ -1021,7 +1036,10 @@ function analyzePromptIntent(prompt) {
     || (/(^|[^a-z])(skill|skills)([^a-z]|$)/i.test(text) && /(创建|修改|优化|重构|合并|拆分|更新|工作流|workflow|流程|路由|router|提示词|规则)/i.test(text))
     || (/AGENTS\.md/i.test(text) && /(创建|修改|优化|精简|收薄|重构|更新)/i.test(text));
   const secretsRequest = /(api\s*key|token|secret|credential|password|凭证|密钥|密码|账号信息|第三方服务凭证|个人信息|登录信息)/i.test(text);
-  const weappValidationRequest = /(微信小程序|miniprogram|weapp|微信开发者工具|weapp-dev-mcp)/i.test(text);
+  const weappMention = /(微信小程序|miniprogram|weapp|微信开发者工具|weapp-dev-mcp)/i.test(text);
+  const weappValidationAction = /(测试|验证|实测|复现|截图|日志|抓日志|抓包|网络请求|network|运行态|开发者工具自动化|从\s*0\s*到\s*1|冷启动|重开|重新打开|全流程)/i.test(text);
+  const weappValidationRequest = /weapp-dev-mcp/i.test(text)
+    || (weappMention && weappValidationAction);
   const browserSafetyRequest = /(computer use|browser use|浏览器|browser|网页|页面|窗口|标签页|tab|profile)/i.test(text)
     && /(点击|输入|提交|登录|注销|退出|支付|关闭|send|submit|type|click|switch account|切换账号)/i.test(text);
   const productCopyRequest = /(文案|copy|错误文案|空状态|成功提示|按钮文案|提示语|toast|placeholder|设置项文案|国际化|i18n|locales|translations|localizable)/i.test(text);
@@ -1042,6 +1060,7 @@ function analyzePromptIntent(prompt) {
     noConfirmationRequested,
     reviewDecision,
     reviewCommand: promptReviewCommand,
+    reviewContinuationRequested,
     readOnly,
     simpleConcrete,
     visualMockupRequest,
@@ -1272,7 +1291,7 @@ function openWeappGate(root, prompt, sessionId = null) {
   return writeNamedGate(root, 'weapp', {
     version: 1,
     active: true,
-    status: 'needs-weapp-mcp-validation',
+    status: 'needs-weapp-runtime-validation',
     openedAt: now(),
     updatedAt: now(),
     promptPreview: preview(prompt, 500),
@@ -1365,6 +1384,11 @@ function reviewActionAuthorizationFor(intent, progress, prompt) {
     versionId: review.versionId,
     digest: review.digest,
     workUnitId: review.workUnitId,
+    continueAfterReview: Boolean(
+      intent?.reviewContinuationRequested
+        || intent?.implementationConfirmation
+        || intent?.explicitExecution
+    ),
     promptPreview: preview(prompt, 500),
     grantedAt: now(),
     source: 'explicit-user-review-decision',
@@ -1598,7 +1622,7 @@ function applyWeappToolSignal(root, payload, sessionId = null) {
   const satisfied = validationSignals.ensureConnection && validationSignals.runtimeAction;
   if (satisfied) {
     return closeWeappGate(root, sessionId, {
-      status: 'validated-through-weapp-mcp',
+      status: 'validated-through-weapp-runtime-evidence',
       validationSignals,
       validatedAt: now(),
     });
@@ -1663,8 +1687,10 @@ function weappGateMessage(gate) {
   }
   return [
     'OpenPrd 微信小程序验证门禁: active。',
-    '当前任务涉及微信小程序测试、验证、截图、日志、网络请求、微信开发者工具自动化，或可能影响小程序运行态的代码修改。',
-    '请先使用 `weapp-dev-mcp` skill，并通过本地 `weapp-dev-mcp` MCP 完成运行态验证；未通过本地 MCP 实际验证时，不要宣称“小程序已验证”。',
+    '只有当用户明确要求小程序实测、复现、截图、抓日志/网络、从 0 到 1 走流程，或当前改动高风险到必须依赖运行态证据时，才升级到本地小程序运行态验证。',
+    '一旦进入小程序运行态验证，默认沿用当前小程序运行态或开发者工具会话连续验证，不要为了验证自动重开应用；只有用户明确要求从 0 到 1、冷启动、重开或重新打开时，才从头启动。',
+    '优先使用当前环境已配置的小程序本地验证能力；如果当前客户端没有相应工具，不要假定已经安装，也不要把缺少工具本身当成任务失败。',
+    '未拿到本地运行态证据前，不要宣称“小程序已验证”。',
   ].join('\n');
 }
 
@@ -1953,7 +1979,7 @@ function largeUiVisualDirectionMessage(intent) {
 }
 
 function codexConfirmationReplyRule() {
-  return 'Codex UI 规则: 只有当前 approval policy 仍然需要人类对稳定 review artifact 做决定时，才在 final answer 里停下来请求确认；如果 review 已确认且 tasks 已就绪，但还需要执行授权，必须先用“执行确认清单”列出本轮目标、将执行内容、不做事项、验证方式和已知风险，再请求明确确认；不要只要求用户回复一句确认。如果用户刚刚已经确认了 L1 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”这类确认已收到的语气，不要写成“确认，我们就按这个……”这种看起来像再次向用户索要确认的句子。如果当前 lane 已进入 silent-record 策略，就继续记录精确 review artifact 并推进，不要为了同一个需求再额外停顿。';
+  return 'Codex UI 规则: 只有当前 approval policy 仍然需要人类对稳定 review artifact 做决定时，才在 final answer 里停下来请求确认；如果 review 已确认且 tasks 已就绪，但还需要执行授权，必须先用“执行确认清单”列出本轮目标、将执行内容、不做事项、验证方式和已知风险，再请求明确确认；不要只要求用户回复一句确认。如果用户贴的是 review 页复制出来的“认可并继续”文案，先记录精确 review artifact，再继续当前 OpenPrd 下一步；不要在只完成 review 记录后停住。如果用户刚刚已经确认了 L1 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”这类确认已收到的语气，不要写成“确认，我们就按这个……”这种看起来像再次向用户索要确认的句子。如果当前 lane 已进入 silent-record 策略，就继续记录精确 review artifact 并推进，不要为了同一个需求再额外停顿。';
 }
 
 function confirmationGateMessage(gate) {
@@ -1972,7 +1998,9 @@ function confirmationGateMessage(gate) {
 
 function currentRequirementStatusLine(gate, progress) {
   if (gate?.status === 'review-confirmation-authorized') {
-    return '用户刚刚确认了当前稳定 PRD 评审稿；本回合只允许记录这一个版本的 review 状态，不能把它直接扩展成实现确认。';
+    return gate?.reviewActionAuthorization?.continueAfterReview
+      ? '用户刚刚确认了当前稳定 PRD 评审稿，并要求继续当前 OpenPrd 下一步；本回合先记录这一个版本的 review 状态，再按同一条 lane 往下推进。若 review 后 tasks 已就绪但还需要执行授权，立刻展示执行确认清单，不要再给一句泛泛确认。'
+      : '用户刚刚确认了当前稳定 PRD 评审稿；本回合只允许记录这一个版本的 review 状态，不能把它直接扩展成实现确认。';
   }
   if (gate?.status === 'review-recording-authorized') {
     return '当前稳定 PRD 评审稿已经按 silent-record 策略授权记录；只允许写回这一个版本，随后继续 change 和 tasks。';
@@ -2015,6 +2043,9 @@ function currentRequirementMessage(intent, gate, progress) {
     reviewPolicyAllowsSilentRecord(approvalPolicy)
       ? '当前 approval policy: decision-points / silent-record。保留稳定 review artifact，但在版本、digest、work unit 精确匹配时不再额外停下来追问用户。'
       : '当前 approval policy: decision-points / human-review。稳定 review artifact 仍需要一次明确的人类决策。',
+    intent?.reviewContinuationRequested
+      ? '这条消息同时表达了“确认当前稳定评审稿并继续当前 OpenPrd 下一步”的意图：先记录精确 review artifact，再继续当前 lane；如果 review 后 tasks 已就绪但还需要执行授权，立刻展示执行确认清单，不要停在“如果你要我继续”。'
+      : '',
     currentRequirementStatusLine(gate, progress),
     reviewPolicyAllowsSilentRecord(approvalPolicy)
       ? 'Decision-point order: clarify the requirement, capture user answers, synthesize the PRD, record the exact stable review artifact, generate the OpenPrd change, prepare the task breakdown, then implement within the confirmed scope.'
@@ -2562,11 +2593,11 @@ function handle(eventName, cwd, payload) {
     const turnState = readTurnState(root);
     const stopIntent = analyzePromptIntent(turnState.prompt || '');
     const weappGate = readNamedGate(root, 'weapp', sessionId);
-    if (weappGate?.active && (stopIntent.weappValidationRequest || (Array.isArray(turnState.touchedFiles) && turnState.touchedFiles.length > 0))) {
+    if (weappGate?.active && stopIntent.weappValidationRequest) {
       return allowHook([
-        'OpenPrd 在本轮收工回顾里发现微信小程序验证仍未完成。',
-        '如果这次任务涉及微信小程序测试、验证、截图、日志、网络请求、微信开发者工具自动化，或修改了可能影响运行态的代码，请先用 `weapp-dev-mcp` skill 和本地 `weapp-dev-mcp` MCP 做实际验证。',
-        '在没有本地 MCP 验证证据前，不要宣称“小程序已验证”。',
+        'OpenPrd 在本轮收工回顾里发现小程序运行态验证仍未完成。',
+        '如果这次任务是用户明确要求的小程序实测、复现、截图、抓日志/网络，或你已经承诺提供运行态证据，请补齐本地运行态验证；补齐时默认沿用当前小程序运行态或开发者工具会话连续验证，不要为了验证自动重开应用；否则不要把普通代码改动默认升级成小程序实测。',
+        '如果当前环境没有可用的小程序本地验证工具，请明确说明未完成运行态验证，不要假定工具已安装。',
       ].join('\n'));
     }
     const devCheckMessage = devCheckWrapUpMessage(root, turnState);

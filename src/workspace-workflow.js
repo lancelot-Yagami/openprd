@@ -1083,6 +1083,7 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
   const storedCurrentState = await persistWorkspaceCurrentState(ws, currentState);
   const nextWs = { ...ws, data: { ...ws.data, currentState: storedCurrentState } };
   await syncSessionBindingFromSnapshot(projectRoot, snapshot, {
+    sessionId: ws.data.currentSessionId ?? null,
     reviewStatus: 'pending-confirmation',
     reviewPath: reviewFiles.canonicalReview,
     activeReviewPath: reviewFiles.activeReviewEntry,
@@ -1270,6 +1271,7 @@ async function reviewWorkspace(projectRoot, options = {}) {
       snapshot.workUnitId ? `工作单元: ${snapshot.workUnitId}。` : null,
     ]);
     await syncSessionBindingFromReview(projectRoot, snapshot, {
+      sessionId: ws.data.currentSessionId ?? null,
       reviewStatus: status,
       reviewPath: reviewFiles.canonicalReview,
       activeReviewPath: reviewFiles.activeReviewEntry,

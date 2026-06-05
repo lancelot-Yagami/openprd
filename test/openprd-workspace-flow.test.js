@@ -1,5 +1,11 @@
 import test from 'node:test';
 import { loadWorkspace } from '../src/workspace-core.js';
+import {
+  readSessionBinding,
+  syncSessionBindingFromChange,
+  syncSessionBindingFromReview,
+  syncSessionBindingFromSnapshot,
+} from '../src/session-binding.js';
 
 import {
   assert,
@@ -171,6 +177,73 @@ test('session-scoped current state stays isolated across requirement lanes', asy
   assert.equal(sessionBState.problemStatement, 'Session B problem statement');
   assert.equal(mirroredCurrentState.problemStatement, 'Session B problem statement');
   assert.equal(mirroredCurrentState.laneSessionId, sessionB);
+});
+
+test('session binding sync prefers the active lane state over a stale legacy gate', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'agent' });
+  const sessionA = '019e8b6e-4e4e-7541-a237-5e8d7d654a11';
+  const sessionB = '019e8b63-669e-70d1-a2c4-5c6d1e40b6d0';
+  const harnessDir = path.join(project, '.openprd', 'harness');
+  const stateDir = path.join(project, '.openprd', 'state');
+  await fs.mkdir(path.join(harnessDir, 'requirement-gates'), { recursive: true });
+  await fs.mkdir(path.join(harnessDir, 'session-bindings'), { recursive: true });
+
+  const staleLegacyGate = {
+    version: 1,
+    active: true,
+    status: 'prd-review-required',
+    sessionId: sessionB,
+    promptPreview: 'stale legacy requirement',
+    openedAt: '2026-06-03 10:00:00',
+    updatedAt: '2026-06-03 10:00:00',
+  };
+  await fs.writeFile(path.join(harnessDir, 'requirement-gate.json'), `${JSON.stringify(staleLegacyGate, null, 2)}\n`);
+  await fs.writeFile(path.join(stateDir, 'current.json'), JSON.stringify({
+    version: 1,
+    laneScope: 'session',
+    laneSessionId: sessionA,
+    status: 'synthesized',
+  }, null, 2));
+
+  const snapshot = {
+    title: 'Scoped Session Binding',
+    versionId: 'v0007',
+    digest: 'digest-session-a',
+    workUnitId: 'wu-session-a',
+    targetRoot: 'docs/basic',
+  };
+
+  await syncSessionBindingFromSnapshot(project, snapshot, {
+    reviewStatus: 'pending-confirmation',
+    reviewPath: 'stable-review-a.html',
+    activeReviewPath: 'active-review-a.html',
+    targetRoot: 'docs/basic',
+  });
+  await syncSessionBindingFromReview(project, snapshot, {
+    reviewStatus: 'confirmed',
+    reviewPath: 'stable-review-a.html',
+    activeReviewPath: 'active-review-a.html',
+    targetRoot: 'docs/basic',
+  });
+  await syncSessionBindingFromChange(project, 'team-builder-a', {
+    versionId: snapshot.versionId,
+    digest: snapshot.digest,
+    workUnitId: snapshot.workUnitId,
+    targetRoot: snapshot.targetRoot,
+    reviewStatus: 'confirmed',
+    reviewPath: 'stable-review-a.html',
+    activeReviewPath: 'active-review-a.html',
+  });
+
+  const bindingA = await readSessionBinding(project, sessionA);
+  const bindingB = await readSessionBinding(project, sessionB);
+  assert.equal(bindingA?.sessionId, sessionA);
+  assert.equal(bindingA?.versionId, 'v0007');
+  assert.equal(bindingA?.reviewStatus, 'confirmed');
+  assert.equal(bindingA?.changeId, 'team-builder-a');
+  assert.equal(bindingA?.reviewPath, 'stable-review-a.html');
+  assert.equal(bindingB, null);
 });
 
 

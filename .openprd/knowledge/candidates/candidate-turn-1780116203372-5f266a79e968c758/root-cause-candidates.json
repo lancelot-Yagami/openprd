@@ -1,0 +1,41 @@
+[
+  {
+    "title": "Inspect src/workspace-core.js"
+  },
+  {
+    "title": "Inspect src/openprd.js"
+  },
+  {
+    "title": "Inspect src/fleet.js"
+  },
+  {
+    "title": "Inspect src/standards.js"
+  },
+  {
+    "title": "Inspect test/helpers/openprd-test-helpers.js"
+  },
+  {
+    "title": "Inspect test/openprd-run-fleet.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-quality-standards.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-agent-integration.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-benchmark-knowledge.test.js"
+  },
+  {
+    "title": "Inspect test/openprd.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-workspace-flow.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-discovery-changes.test.js"
+  },
+  {
+    "title": "Inspect test/openprd-github-release.test.js"
+  }
+]

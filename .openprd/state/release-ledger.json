@@ -2,7 +2,7 @@
   "version": 1,
   "enabled": true,
   "strategy": "semver",
-  "currentVersion": "0.1.4",
+  "currentVersion": "0.1.5",
   "versions": [
     {
       "version": "0.1.2",
@@ -114,9 +114,9 @@
     },
     {
       "version": "0.1.4",
-      "status": "current",
+      "status": "released",
       "createdAt": "2026-06-03 12:53:20",
-      "updatedAt": "2026-06-03 12:53:20",
+      "updatedAt": "2026-06-05 09:02:25",
       "notes": null,
       "items": [
         {
@@ -154,8 +154,62 @@
         }
       ],
       "tag": null
+    },
+    {
+      "version": "0.1.5",
+      "status": "current",
+      "createdAt": "2026-06-05 09:02:25",
+      "updatedAt": "2026-06-05 09:02:25",
+      "notes": null,
+      "items": [
+        {
+          "type": "优化",
+          "summary": "优化",
+          "detail": "新需求默认先走需求分流，只有继续既有优化或恢复指定会话时才优先续接历史上下文",
+          "sentence": "优化：新需求默认先走需求分流，只有继续既有优化或恢复指定会话时才优先续接历史上下文",
+          "recordedAt": "2026-06-05 09:02:25",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-1780621345707"
+          }
+        },
+        {
+          "type": "修复",
+          "summary": "修复",
+          "detail": "同一条需求已确认后，后续承接直接继续执行，不再重复索要确认",
+          "sentence": "修复：同一条需求已确认后，后续承接直接继续执行，不再重复索要确认",
+          "recordedAt": "2026-06-05 09:02:25",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-1780621345801"
+          }
+        },
+        {
+          "type": "优化",
+          "summary": "优化",
+          "detail": "历史会话恢复优先按显式 session id 和全局 session registry 找到真实工作区",
+          "sentence": "优化：历史会话恢复优先按显式 session id 和全局 session registry 找到真实工作区",
+          "recordedAt": "2026-06-05 09:02:25",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-1780621345896"
+          }
+        },
+        {
+          "type": "修复",
+          "summary": "修复",
+          "detail": "fleet 批量更新会补齐 active flows roles handoff，并忽略旧项目 docs basic 与 source manual 假失败",
+          "sentence": "修复：fleet 批量更新会补齐 active flows roles handoff，并忽略旧项目 docs basic 与 source manual 假失败",
+          "recordedAt": "2026-06-05 09:02:25",
+          "source": {
+            "kind": "manual-note",
+            "manualId": "manual-note-1780621345979"
+          }
+        }
+      ],
+      "tag": null
     }
   ],
   "createdAt": "2026-06-02 21:28:04",
-  "updatedAt": "2026-06-03 12:53:20"
+  "updatedAt": "2026-06-05 09:02:25"
 }

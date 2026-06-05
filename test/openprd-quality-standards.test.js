@@ -94,7 +94,7 @@ import {
   writeValidReviewPresentation,
   synthesizeWorkspace,
   writeMinimalChange,
-} from 'openprd-test-helpers';
+} from './helpers/openprd-test-helpers.js';
 test('quality verify writes html eval report and learn creates experience skill', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });
@@ -458,6 +458,11 @@ test('run verify describes feature-coverage debt as task ledger attention instea
     '  - type: governance',
     '  - done: feature coverage evidence is recorded for the remaining task',
     '  - verify: openprd tasks . --change ledger-gap --advance --verify --item T001.02',
+    '- [ ] T001.03 Capture the dependent follow-up note',
+    '  - type: governance',
+    '  - deps: T001.02',
+    '  - done: dependent follow-up note is recorded after the remaining evidence is captured',
+    '  - verify: openprd tasks . --change ledger-gap --advance --verify --item T001.03',
     '',
   ].join('\n'));
   await fs.writeFile(path.join(project, 'openprd', 'changes', 'ledger-gap', 'specs', 'ledger-gap', 'spec.md'), [
@@ -480,8 +485,15 @@ test('run verify describes feature-coverage debt as task ledger attention instea
   }, null, 2)}\n`);
 
   const quality = await verifyQualityWorkspace(project);
+  const featureCoverageGate = quality.report.gates.find((gate) => gate.id === 'feature-coverage');
+  const strategyTask = quality.report.evalHarness.testStrategy.tasks.find((task) => task.id === 'T001.01');
   assert.equal(quality.report.readiness.productionReady, false);
   assert.deepEqual(quality.report.readiness.attentionGates, ['feature-coverage']);
+  assert.equal(quality.report.evalHarness.featureCoverage.activeTasks.pending, 2);
+  assert.equal(quality.report.evalHarness.featureCoverage.activeTasks.blocked, 1);
+  assert.equal(strategyTask?.done, true);
+  assert.ok(featureCoverageGate?.warnings?.[0].includes('不等于当前实现失败'));
+  assert.ok(quality.errors.some((error) => error.includes('不等于当前实现失败')));
 
   const verified = await runWorkspace(project, { verify: true });
   const qualityCheck = verified.checks.find((check) => check.name === 'quality');
@@ -491,10 +503,11 @@ test('run verify describes feature-coverage debt as task ledger attention instea
   assert.equal(qualityCheck.ok, false);
   assert.equal(verified.workspaceAttention?.kind, 'feature-coverage-ledger');
   assert.equal(verified.workspaceAttention?.activeChange, 'ledger-gap');
-  assert.equal(verified.workspaceAttention?.pending, 1);
+  assert.equal(verified.workspaceAttention?.pending, 2);
+  assert.equal(verified.workspaceAttention?.blocked, 1);
   assert.ok(verified.workspaceAttention?.detail.includes('task bookkeeping or coverage evidence is incomplete'));
   assert.ok(verified.warnings.some((warning) => warning.includes('task bookkeeping or coverage evidence is incomplete')));
-  assert.ok(qualityCheck.errors.some((error) => error.includes('task bookkeeping or coverage evidence is incomplete')));
+  assert.ok(qualityCheck.errors.some((error) => error.includes('不等于当前实现失败') || error.includes('task bookkeeping or coverage evidence is incomplete')));
 });
 
 test('quality requires reference-driven visual evidence for frontend changes', async () => {
@@ -864,7 +877,7 @@ test('dev-check reports code file line status and next actions', async () => {
     assert.ok(Array.from(row.后续建议).length <= 20);
   }
   assert.equal(result.files.find((file) => file.path === 'generated/bundle.js').status, 'exempt');
-  assert.equal(result.files.find((file) => file.path === 'README.md').status, 'not-code');
+  assert.equal(result.files.find((file) => file.path === 'README.md').status, 'ok');
 
   const logs = [];
   const originalLog = console.log;
@@ -1223,7 +1236,7 @@ test('dev-check auto-applies detected unknown code extensions', async () => {
   assert.match(reviewText, /下一步: 当前没有待确认增长候选。/);
 
   const standardsConfig = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'standards', 'config.json'), 'utf8'));
-  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.astro']);
+  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.json', '.md', '.astro']);
 
   const recognized = await checkDevelopmentStandardsWorkspace(project, {
     files: ['src/component.astro'],
@@ -1279,7 +1292,7 @@ test('dev-check also auto-applies low-confidence unknown code extensions', async
   assert.match(reviewText, /候选: 0 待确认，1 已应用，0 已拒绝。/);
 
   const standardsConfig = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'standards', 'config.json'), 'utf8'));
-  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.tpl']);
+  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.json', '.md', '.tpl']);
 
   const recognized = await checkDevelopmentStandardsWorkspace(project, {
     files: ['src/maybe.tpl'],
@@ -1327,7 +1340,7 @@ test('growth init reconciles older pending code-extension candidates into auto-a
   assert.equal(after.applied[0].applyMode, 'auto');
 
   const standardsConfig = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'standards', 'config.json'), 'utf8'));
-  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.md']);
+  assert.deepEqual(standardsConfig.developmentStandards.codeFileLines.codeFileExtensions, ['.json', '.md']);
 });
 
 test('standards ignore non-owned generated and marketplace source trees', async () => {

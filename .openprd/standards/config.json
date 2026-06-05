@@ -49,7 +49,10 @@
       "okMax": 700,
       "attentionMax": 1500,
       "appliesTo": "agent-touched-code-files",
-      "codeFileExtensions": [],
+      "codeFileExtensions": [
+        ".json",
+        ".md"
+      ],
       "exemptPathSegments": [],
       "exemptFilePatterns": []
     }
@@ -57,6 +60,13 @@
   "growth": {
     "enabled": true,
     "reviewRequired": true,
+    "autoApply": {
+      "enabled": true,
+      "minConfidence": 0.8,
+      "safeTypes": [
+        "code-extension"
+      ]
+    },
     "candidateLimit": 200,
     "scopes": [
       "project",
@@ -70,14 +80,7 @@
       "user-preference",
       "workflow-gotcha",
       "standards-rule"
-    ],
-    "autoApply": {
-      "enabled": true,
-      "minConfidence": 0.8,
-      "safeTypes": [
-        "code-extension"
-      ]
-    }
+    ]
   },
   "externalReferences": {
     "paths": []
