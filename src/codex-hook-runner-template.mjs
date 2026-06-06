@@ -1947,6 +1947,7 @@ function runOpenPrd(args, cwd) {
     cwd,
     encoding: 'utf8',
     timeout: 30000,
+    maxBuffer: 10 * 1024 * 1024,
     env: process.env,
   });
   return {
@@ -1967,6 +1968,17 @@ function parseJsonOutput(text) {
   } catch {
     return null;
   }
+}
+
+function compactSingleLine(text, limit = 240) {
+  const singleLine = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!singleLine) {
+    return '';
+  }
+  if (singleLine.length <= limit) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, Math.max(0, limit - 1))}…`;
 }
 
 function devCheckWrapUpMessage(root, turnState) {
@@ -2023,7 +2035,8 @@ function summarizeRunVerifyCheck(parsed, fallbackText = '') {
 
 function summarizeDoctorCheck(parsed, fallbackText = '') {
   if (!parsed?.agentIntegration && !parsed?.standards && !parsed?.validation) {
-    return fallbackText || 'doctor result unavailable';
+    const compact = compactSingleLine(fallbackText);
+    return compact || 'doctor result unavailable';
   }
   const parts = [];
   if (parsed.agentIntegration) {
