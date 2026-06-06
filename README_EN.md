@@ -64,6 +64,24 @@ OpenPrd is strongest when the hard part is not just "what code should be written
 but "what should people confirm, what should stay visible, and what evidence is
 enough to move forward."
 
+## Built-In Best-Practice Routing And Default Enhancers
+
+OpenPrd does more than sequence requirement work. It also ships with a best-practice routing layer so the agent can look in the right place before it changes design, copy, or code.
+
+- **Public-repo architecture understanding**: when the task is to understand a public GitHub repository, its subsystem layout, or a key execution flow, OpenPrd pushes the agent toward `DeepWiki` first
+- **Third-party technical documentation**: when the task depends on library, framework, API, CLI, or MCP usage, config, limits, version differences, or migration paths, OpenPrd pushes the agent toward `Context7` first
+- **Icons and visual assets**: when the task is to choose UI icons, AI brand icons, tech-stack icons, 3D assets, or functional icon resources, OpenPrd routes that request toward more appropriate sources instead of making the agent guess on the fly
+- **Project-level long-term references**: repeatedly adopted external sources can be promoted into the project's own reusable best-practice registry
+
+The goal is not to pile up links. The goal is to make "where should we look first, why this source, and when is the evidence sufficient" part of the normal collaboration flow. For AI coding work, that directly affects design quality, technical judgment, and implementation stability.
+
+Common built-in enhancement directions include:
+
+- `DeepWiki`: understand public GitHub repository architecture, module relationships, and key flows
+- `Context7`: retrieve current third-party technical docs, config guidance, version differences, and migration notes
+- Icon and visual-asset routing: prefer sources such as `Phosphor Icons`, `LobeHub Icons`, `Tech Icons`, `Thiings`, and `iconfont` by use case
+- Icon implementation library suggestions: when the work reaches frontend code, narrow to `Lucide`, `Tabler`, or `React Icons` based on project fit
+
 ## Common Real-World Scenarios
 
 Recent Codex project usage kept clustering around the same kinds of work: fuzzy
@@ -150,6 +168,8 @@ automatically.
 - **Scenario-aware collaboration**: distinguish greenfield cold start, existing-project cold start, and continuing workspaces
 - **Self-evolving collaboration**: turn confirmed project habits into reusable `Project-Level Skill`s and adapt `Dynamic Parameter Config` by scenario
 - **Source-aware capture**: mark inputs as `user-confirmed`, `project-derived`, `agent-inferred`, or `agent-normalized`
+- **Best-practice routing**: route public-repo understanding, third-party technical docs, icon resources, and workflow optimization requests to stronger evidence sources before implementation
+- **Project-level benchmark registry**: support `benchmark add / observe / approve / verify` so repeatedly adopted external sources can become durable project references
 - **Diagram review artifacts**: generate both architecture and product-flow diagrams
 - **UI visual comparison artifacts**: combine reference images and implementation screenshots into side-by-side JPG reviews for visual replication work
 - **Contract-driven diagrams**: render from validated JSON contracts
