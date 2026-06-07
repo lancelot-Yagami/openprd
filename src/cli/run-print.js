@@ -152,6 +152,13 @@ function printRunResult(result, json) {
     console.log(`协作建议: ${result.recommendation.parallelPlan.summary}`);
   }
   console.log(`这样安排的原因: ${result.recommendation.reason}`);
+  if (
+    result.recommendation.nextAction === 'clarify-user'
+    || result.recommendation.title === 'clarify-user'
+    || result.recommendation.title === '继续本轮需求入口澄清'
+  ) {
+    console.log('当前回复目标: 先在对话里输出 requirement 摘要或只追问 1 个最高价值澄清点；不要承诺“按默认方案直接实现”，也不要把“请帮我实现/继续实现”当成跳过 requirement 摘要确认的依据。');
+  }
   if (result.recommendation.preparationCommand || result.recommendation.executionCommand || result.recommendation.commitCommand) {
     console.log('开始动手前提: 只有在用户明确要求继续落地、实现、修复、深挖或提交时，才继续往下做；如果还缺这一步，就先用人话说明范围和影响。');
   }

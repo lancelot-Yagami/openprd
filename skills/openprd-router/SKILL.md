@@ -37,4 +37,4 @@ description: OpenPrd 入口路由 skill。先判断当前任务该读哪个 repo
 - hooks 已经强制处理 requirement / research / secrets / skill-visualization / weapp / browser / copy 这些门禁
 - 公开 GitHub 仓库架构/对标先 DeepWiki；第三方库、API、SDK、MCP、CLI 用法先查本地证据，本地不足时再按 `resolve_library_id -> query_docs` 使用 Context7
 - 如果用户只是要规划、分析、评审或解释影响范围，保持只读，不要因为命令存在就直接执行写入
-- 不要用固定关键词决定是否写 PRD；先让 `openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本做语义分流
+- 不要用固定关键词决定是否写 PRD，也不要用词表决定工具；先让 `openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本做语义分流，再按用户目标、期望产物、交付阶段和证据缺口选择学习器、视觉评审或质量收口工具

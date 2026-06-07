@@ -370,9 +370,31 @@ function validateTextSections(relativePath, text, sections, errors) {
   }
 }
 
-function sourceManualReadmeName(projectRoot, dirPath) {
-  const moduleName = path.basename(projectRoot).replace(/[^a-zA-Z0-9_-]+/g, '-');
-  const folderName = path.basename(dirPath).replace(/[^a-zA-Z0-9_-]+/g, '-');
+function normalizeModuleName(raw, fallback = 'project') {
+  const candidate = String(raw ?? '').trim().split('/').filter(Boolean).pop() ?? '';
+  const normalized = candidate.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+async function resolveSourceManualModuleName(projectRoot, config = {}) {
+  const configuredName = typeof config?.folderManual?.moduleName === 'string'
+    ? config.folderManual.moduleName.trim()
+    : '';
+  if (configuredName) {
+    return normalizeModuleName(configuredName, normalizeModuleName(path.basename(projectRoot)));
+  }
+
+  const packageJson = await readJson(cjoin(projectRoot, 'package.json')).catch(() => null);
+  const packageName = typeof packageJson?.name === 'string' ? packageJson.name.trim() : '';
+  if (packageName) {
+    return normalizeModuleName(packageName, normalizeModuleName(path.basename(projectRoot)));
+  }
+
+  return normalizeModuleName(path.basename(projectRoot));
+}
+
+function sourceManualReadmeName(moduleName, dirPath) {
+  const folderName = path.basename(dirPath).replace(/[^a-zA-Z0-9_-]+/g, '-') || moduleName;
   return `${moduleName}_${folderName}_README.md`;
 }
 
@@ -602,6 +624,7 @@ async function validateSourceManuals(projectRoot, errors, checks, options = {}) 
   const sourceFiles = await collectSourceFiles(projectRoot, projectRoot, [], options.ignorePatterns, discovery);
   const filesMissingManualRaw = [];
   const foldersMissingManualRaw = [];
+  const moduleName = await resolveSourceManualModuleName(projectRoot, options.config ?? {});
 
   for (const filePath of sourceFiles) {
     const relativePath = path.relative(projectRoot, filePath);
@@ -613,7 +636,8 @@ async function validateSourceManuals(projectRoot, errors, checks, options = {}) 
 
   const sourceDirsRaw = new Set(sourceFiles.map((filePath) => path.dirname(filePath)));
   for (const dirPath of sourceDirsRaw) {
-    const expectedPath = cjoin(dirPath, sourceManualReadmeName(projectRoot, dirPath));
+    const folderLabel = dirPath === projectRoot ? moduleName : null;
+    const expectedPath = cjoin(dirPath, sourceManualReadmeName(moduleName, folderLabel ?? dirPath));
     const relativePath = path.relative(projectRoot, expectedPath);
     const text = await readText(expectedPath).catch(() => null);
     if (!text || !hasAllManualSections(text)) {
@@ -785,6 +809,9 @@ export async function checkStandardsWorkspace(projectRoot, options = {}) {
     if (config.docsRoot !== 'docs/basic') {
       errors.push(`${OPENPRD_STANDARDS_CONFIG} docsRoot must be docs/basic.`);
     }
+    if (config?.folderManual?.moduleName != null && (typeof config.folderManual.moduleName !== 'string' || !config.folderManual.moduleName.trim())) {
+      errors.push(`${OPENPRD_STANDARDS_CONFIG} folderManual.moduleName must be a non-empty string when provided.`);
+    }
     validateDevelopmentStandardsConfig(config, errors);
     validateGrowthConfig(config, errors);
     for (const externalPath of normalizeStringList(config?.externalReferences?.paths)) {
@@ -847,7 +874,7 @@ export async function checkStandardsWorkspace(projectRoot, options = {}) {
     && config?.fileManual?.enabled !== false
     && config?.folderManual?.enabled !== false;
   const manualReport = enforceSourceManuals
-    ? await validateSourceManuals(projectRoot, errors, checks, { ignorePatterns, externalReferencePaths })
+    ? await validateSourceManuals(projectRoot, errors, checks, { ignorePatterns, externalReferencePaths, config })
     : {
       ignorePatterns,
       externalReferencePaths,

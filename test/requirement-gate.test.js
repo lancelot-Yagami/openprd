@@ -83,12 +83,85 @@ async function synthesizeWorkspace(project, options = {}) {
   };
 }
 
-async function captureFreshRequirementState(project, value = '用户已经确认了本轮需求的核心信息。') {
-  await captureWorkspace(project, {
-    field: 'problem.problemStatement',
-    value,
-    source: 'user-confirmed',
-  });
+async function captureFreshRequirementState(
+  project,
+  value = '用户已经确认了本轮需求的核心信息。',
+  options = {}
+) {
+  const productType = options.productType ?? 'agent';
+  const typeSpecificCaptures = productType === 'consumer'
+    ? [
+        ['typeSpecific.fields.persona', '希望展示自己经历与内容的个人创作者。'],
+        ['typeSpecific.fields.segment', '首次访问者与回访读者。'],
+        ['typeSpecific.fields.journey', ['进入首页', '阅读内容', '决定联系']],
+        ['typeSpecific.fields.activationMetric', '访客完成一次详情阅读或联系点击。'],
+        ['typeSpecific.fields.retentionMetric', '访客会因为内容更新而再次访问。'],
+      ]
+    : productType === 'b2b'
+      ? [
+          ['typeSpecific.fields.buyer', '业务负责人'],
+          ['typeSpecific.fields.user', '一线使用者'],
+          ['typeSpecific.fields.admin', '系统管理员'],
+          ['typeSpecific.fields.operator', '流程运营者'],
+          ['typeSpecific.fields.roles', ['业务负责人', '使用者', '管理员']],
+          ['typeSpecific.fields.asIs', '当前流程依赖人工串联。'],
+          ['typeSpecific.fields.toBe', '未来流程由产品统一承接。'],
+          ['typeSpecific.fields.permissionMatrix', '按角色控制查看与操作权限。'],
+          ['typeSpecific.fields.approvalFlow', '关键节点需要负责人确认。'],
+        ]
+      : [
+          ['typeSpecific.fields.humanAgentContract', '高风险决定由人确认，常规整理可由 Agent 自动完成。'],
+          ['typeSpecific.fields.autonomyBoundary', 'Agent 可在已确认范围内整理需求，但不能越过人类确认边界直接扩范围。'],
+          ['typeSpecific.fields.toolBoundary', '可使用当前工作区内已接入的工具与 OpenPrd 命令。'],
+          ['typeSpecific.fields.stateModel', '保留 requirement lane、review 状态和任务状态。'],
+          ['typeSpecific.fields.evalPlan', '通过需求评审、任务验证和最终收口检查判断是否达标。'],
+        ];
+  const captures = [
+    ['meta.title', '已确认需求'],
+    ['meta.owner', 'OpenPrd'],
+    ['meta.version', '0.1.0'],
+    ['meta.status', 'draft'],
+    ['meta.productType', productType],
+    ['problem.problemStatement', value],
+    ['problem.whyNow', '当前要把已确认范围整理成可执行需求。'],
+    ['problem.evidence', ['用户已经确认了本轮需求范围。']],
+    ['users.primaryUsers', ['一线操作员']],
+    ['users.stakeholders', ['需求发起人']],
+    ['goals.goals', ['完成本轮确认目标']],
+    ['goals.successMetrics', ['核心路径可走通']],
+    ['goals.acceptanceGoals', ['主流程可验收']],
+    ['scope.inScope', ['当前确认范围']],
+    ['scope.outOfScope', ['外围扩展能力']],
+    ['scenarios.primaryFlows', ['用户完成主流程']],
+    ['scenarios.edgeCases', ['异常输入可提示']],
+    ['scenarios.failureModes', ['关键步骤失败可回退']],
+    ['requirements.functional', ['支持本轮核心流程']],
+    ['requirements.nonFunctional', ['文案面向普通用户']],
+    ['requirements.businessRules', ['只做本轮确认范围']],
+    ['constraints.technical', ['沿用当前工作区技术边界']],
+    ['constraints.compliance', ['不写入敏感信息']],
+    ['constraints.dependencies', ['依赖当前工作区与本地验证']],
+    ['businessGuardrails.costDrivers', ['主要成本来自当前工作区内的工具调用与执行时长。']],
+    ['businessGuardrails.usageLimits', ['首版按已确认范围执行，不开放无限制批量能力。']],
+    ['businessGuardrails.abusePrevention', ['关键动作保留确认边界，避免越权或重复触发。']],
+    ['businessGuardrails.monitoringSignals', ['关注执行成功率、失败率和异常重试。']],
+    ['businessGuardrails.alertThresholds', ['异常失败率连续升高时立即停下复核。']],
+    ['businessGuardrails.stopLossActions', ['发现异常时暂停自动推进，回退到人工确认。']],
+    ['risks.assumptions', ['用户接受当前确认方向']],
+    ['risks.risks', ['后续细节可能仍需验证']],
+    ['risks.openQuestions', ['更大范围扩展另行确认']],
+    ['handoff.owner', 'OpenPrd'],
+    ['handoff.nextStep', '继续生成这版需求稿'],
+    ['handoff.targetSystem', '当前工作区'],
+    ...typeSpecificCaptures,
+  ];
+  for (const [field, capturedValue] of captures) {
+    await captureWorkspace(project, {
+      field,
+      value: capturedValue,
+      source: 'user-confirmed',
+    });
+  }
 }
 
 function runCodexHook(project, eventName, payload) {
@@ -269,9 +342,9 @@ describe('Codex requirement gate', () => {
       prompt: 'Windows用户反馈，他在更新新版本的时候，出现如图的一个报错，请你排查一下什么原因，并如果能定位到原因，直接帮我修复',
     });
     assert.equal(directBugfixPromptPayload.continue, true);
-    assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('快速修正 (L0)'));
+    assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('直接处理 (L0)'));
     assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('需求类型 / 理由 / 推荐下一步'));
-    assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('需求类型：快速修正（L0）'));
+    assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('需求类型：直接处理（L0）'));
     assert.ok(directBugfixPromptPayload.hookSpecificOutput.additionalContext.includes('不打开正式 PRD/review/change/tasks'));
     assert.equal(await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gate.json')), false);
 
@@ -376,6 +449,140 @@ describe('Codex requirement gate', () => {
     assert.equal(allowedSynthesizePayload.continue, true);
   });
 
+  test('Codex hook treats short clarification follow-ups as confirmation', async () => {
+    const { project } = await makeCodexHookProject();
+
+    const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '请直接实现：在【Agent管理】模块下，我希望增加一个【团队搭建】放到【Agent 工区】菜单下面，这个模块主要是将 Agent市场、技能库和 CLI库按流程串联起来，一站式完成配置。',
+    });
+    assert.equal(requirementPromptPayload.continue, true);
+
+    const defaultChoicePayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '就按这个先走',
+    });
+    assert.equal(defaultChoicePayload.continue, true);
+
+    const requirementGatePath = path.join(project, '.openprd', 'harness', 'requirement-gate.json');
+    const requirementGate = JSON.parse(await fs.readFile(requirementGatePath, 'utf8'));
+    assert.equal(requirementGate.status, 'clarification-confirmed');
+  });
+
+  test('synthesize blocks clarification-confirmed lanes until required facts are rewritten as user-confirmed', async () => {
+    const project = await makeTempProject();
+    await initWorkspace(project, { templatePack: 'consumer' });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: true,
+      status: 'clarification-confirmed',
+      openedAt: '2026-06-07 00:00:00',
+      updatedAt: '2026-06-07 00:00:00',
+      clarificationConfirmedAt: '2026-06-07 00:00:00',
+      promptPreview: '请帮我实现一个个人博客网站',
+      requiredFlow: ['clarify', 'capture', 'synthesize', 'review', 'change-generate', 'tasks', 'implementation'],
+    }, null, 2));
+
+    await captureWorkspace(project, {
+      field: 'problem.whyNow',
+      value: '先用推断事实补一版。',
+      source: 'agent-inferred',
+    });
+
+    await assert.rejects(
+      () => synthesizeWorkspace(project, {
+        title: '个人博客网站第一版',
+        owner: 'OpenPrd',
+        problemStatement: '从零实现一个个人博客网站。',
+        whyNow: '用户已经确认先做第一版博客站。',
+        primaryUsers: ['博客访问者'],
+        goals: ['展示个人内容与文章'],
+        successMetrics: ['访问者可打开首页并进入文章详情'],
+        acceptanceGoals: ['首页和文章详情可访问'],
+        inScope: ['首页与文章详情'],
+        outOfScope: ['评论系统'],
+        primaryFlows: ['访问首页并打开文章详情'],
+        functional: ['展示个人介绍与文章内容'],
+        productType: 'consumer',
+      }),
+      /当前需求摘要虽已确认|canonical|user-confirmed/
+    );
+
+    await captureWorkspace(project, {
+      field: 'problem.problemStatement',
+      value: '从零实现一个个人博客网站。',
+      source: 'user-confirmed',
+    });
+    await captureWorkspace(project, {
+      field: 'problem.whyNow',
+      value: '用户已经确认先做第一版博客站。',
+      source: 'user-confirmed',
+    });
+    await captureFreshRequirementState(project, '从零实现一个个人博客网站。', { productType: 'consumer' });
+
+    const synthesized = await synthesizeWorkspace(project, {
+      title: '个人博客网站第一版',
+      owner: 'OpenPrd',
+      problemStatement: '从零实现一个个人博客网站。',
+      whyNow: '用户已经确认先做第一版博客站。',
+      primaryUsers: ['博客访问者'],
+      goals: ['展示个人内容与文章'],
+      successMetrics: ['访问者可打开首页并进入文章详情'],
+      acceptanceGoals: ['首页和文章详情可访问'],
+      inScope: ['首页与文章详情'],
+      outOfScope: ['评论系统'],
+      primaryFlows: ['访问首页并打开文章详情'],
+      functional: ['展示个人介绍与文章内容'],
+      productType: 'consumer',
+    });
+    assert.equal(synthesized.snapshot.versionId, 'v0001');
+  });
+
+  test('synthesize blocks clarification-confirmed lanes when the requirement lane still recommends classify or interview', async () => {
+    const project = await makeTempProject();
+    await initWorkspace(project, { templatePack: 'consumer' });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: true,
+      status: 'clarification-confirmed',
+      openedAt: '2026-06-07 00:00:00',
+      updatedAt: '2026-06-07 00:00:00',
+      clarificationConfirmedAt: '2026-06-07 00:00:00',
+      promptPreview: '请帮我实现一个个人博客网站',
+      requiredFlow: ['clarify', 'capture', 'synthesize', 'review', 'change-generate', 'tasks', 'implementation'],
+    }, null, 2));
+
+    await captureWorkspace(project, {
+      field: 'problem.problemStatement',
+      value: '需要从空白工作区实现一个个人博客网站。',
+      source: 'user-confirmed',
+    });
+    await captureWorkspace(project, {
+      field: 'problem.whyNow',
+      value: '用户已经确认先做第一版博客站。',
+      source: 'user-confirmed',
+    });
+
+    await assert.rejects(
+      () => synthesizeWorkspace(project, {
+        title: '个人博客网站第一版',
+        owner: 'OpenPrd',
+        problemStatement: '从零实现一个个人博客网站。',
+        whyNow: '用户已经确认先做第一版博客站。',
+        primaryUsers: ['博客访问者'],
+        goals: ['展示个人内容与文章'],
+        successMetrics: ['访问者可打开首页并进入文章详情'],
+        acceptanceGoals: ['首页和文章详情可访问'],
+        inScope: ['首页与文章详情'],
+        outOfScope: ['评论系统'],
+        primaryFlows: ['访问首页并打开文章详情'],
+        functional: ['展示个人介绍与文章内容'],
+        productType: 'consumer',
+      }),
+      /还没有离开需求补齐阶段|建议先执行: openprd (clarify|classify|interview)/
+    );
+  });
+
   test('Codex hook injects matched project knowledge skills and records adoption', async () => {
     const { project } = await makeCodexHookProject();
     await seedProjectKnowledgeSkill(project);
@@ -399,10 +606,10 @@ describe('Codex requirement gate', () => {
     const diagnosticPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: [
         '看下这个 codex 对话记录：019e9b0e-00dc-7ca2-b673-157af1082f5c',
-        'openprd 能不能将“需求类型：快速修正”显示为“需求类型：快速修正（L0）”，这样就不需要占用额外的“内部路由码”这一行，因为对用户来说好像意义不大',
+        'openprd 能不能将“需求类型：直接处理”显示为“需求类型：直接处理（L0）”，这样就不需要占用额外的“内部路由码”这一行，因为对用户来说好像意义不大',
         '',
         '【原文内容】',
-        '需求类型：快速修正',
+        '需求类型：直接处理',
         '内部路由码：L0',
         '理由：已经有本机日志把问题收窄到“启动动作落到了 global Hermes，而不是 agent-45031fde profile”，现在继续只读追踪这条调用链最合适。',
         '推荐下一步：我先从 framework.hermes.start 和 framework.hermes.restart 的派发入口往下读，确认桌面在什么条件下会把 profile 级动作降成 global。',
@@ -442,10 +649,12 @@ describe('Codex requirement gate', () => {
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd clarify .'));
     assert.equal(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd clarify . --open'), false);
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('需求类型判断'));
-    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('快速修正=L0'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('直接处理=L0'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('现有功能优化=L1'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('新功能/新流程方案=L2'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('需求判断 / 需求理解 / 功能范围 / 技术方案'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('轻量主句'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('固定模板'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('Markdown tables'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('final answer'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('approval policy'));
@@ -460,6 +669,10 @@ describe('Codex requirement gate', () => {
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('确认，我们就按这个'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('先整理需求摘要给你确认'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('你回我一句我就开始实现'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('openprd learn .'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('学习包骨架'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('focus-board.json'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('组合到同一张证据板里统一验收'));
     const requirementGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
     assert.equal(requirementGate.active, true);
     assert.equal(requirementGate.status, 'requires-clarification');
@@ -566,6 +779,28 @@ describe('Codex requirement gate', () => {
     const executionAuthorizedGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
     assert.equal(executionAuthorizedGate.active, false);
     assert.equal(executionAuthorizedGate.status, 'execution-authorized');
+  });
+
+  test('run context keeps cold-start implementation prompts in clarify-summary mode', async () => {
+    const { project } = await makeCodexHookProject();
+
+    const result = spawnSync(process.execPath, [
+      path.resolve('bin/openprd.js'),
+      'run',
+      project,
+      '--context',
+      '--message',
+      '请帮我实现一个个人博客网站',
+    ], {
+      cwd: path.resolve('.'),
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /建议下一步: (继续本轮需求入口澄清|clarify-user)/);
+    assert.match(result.stdout, /当前回复目标: 先在对话里输出 requirement 摘要或只追问 1 个最高价值澄清点/);
+    assert.match(result.stdout, /不要承诺“按默认方案直接实现”/);
+    assert.match(result.stdout, /不要把“请帮我实现\/继续实现”当成跳过 requirement 摘要确认的依据/);
+
   });
 
 test('Codex hook accepts a later same-session execution instruction once review and tasks are ready', async () => {
@@ -1329,5 +1564,43 @@ test('Codex hook supports silent-record review lanes when the user opts out of e
     const copyStopReminder = runCodexHook(project, 'Stop', {});
     assert.equal(copyStopReminder.continue, true);
     assert.equal(copyStopReminder.hookSpecificOutput?.additionalContext?.includes('小程序运行态验证仍未完成') ?? false, false);
+  });
+
+  test('Stop hook reminds about project-level closeout when final verification artifacts are missing', async () => {
+    const project = await makeTempProject();
+    await initWorkspace(project, { templatePack: 'consumer' });
+    await fs.mkdir(path.join(project, 'src'), { recursive: true });
+    await fs.writeFile(path.join(project, 'src', 'closeout.js'), 'export const closeout = true;\n');
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'turn-state.json'), `${JSON.stringify({
+      version: 1,
+      prompt: '继续把这轮实现完整收口。',
+      touchedFiles: ['src/closeout.js'],
+      reviewSignals: [
+        {
+          id: 'loop-finish-signal',
+          kind: 'loop-finish',
+          ok: true,
+          summary: 'task scoped evidence is ready',
+          touchedFiles: ['src/closeout.js'],
+        },
+      ],
+    }, null, 2)}\n`);
+
+    const stop = spawnSync(process.execPath, [path.join(project, '.codex', 'hooks', 'openprd-hook.mjs'), 'Stop'], {
+      cwd: project,
+      input: JSON.stringify({ cwd: project, hook_event_name: 'Stop' }),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        OPENPRD_CLI: path.resolve('openprd/bin/openprd.js'),
+      },
+    });
+    assert.equal(stop.status, 0);
+    const payload = JSON.parse(stop.stdout);
+    const context = payload.hookSpecificOutput.additionalContext;
+    assert.match(context, /项目级收口证据还没补齐/);
+    assert.match(context, /openprd quality \. --verify/);
+    assert.match(context, /openprd run \. --verify/);
+    assert.match(context, /Markdown \/ HTML 测试报告/);
   });
 });

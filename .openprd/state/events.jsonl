@@ -431,3 +431,10 @@
 {"type":"work_units_backfilled","at":"2026-06-05 08:44:22","versions":5,"changedVersions":5}
 {"type":"next","at":"2026-06-05 09:05:05","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
 {"type":"next","at":"2026-06-05 09:05:28","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"work_units_backfilled","at":"2026-06-06 17:34:39","versions":5,"changedVersions":5}
+{"type":"next","at":"2026-06-06 22:43:23","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"next","at":"2026-06-06 23:03:21","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"next","at":"2026-06-06 23:29:25","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"next","at":"2026-06-07 00:36:29","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"next","at":"2026-06-07 01:04:17","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}
+{"type":"next","at":"2026-06-07 12:43:49","nextAction":"diagram","reason":"A architecture diagram has not been generated yet and should be reviewed before freeze.","missingRequiredFields":0}

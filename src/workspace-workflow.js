@@ -11,7 +11,7 @@ import { assertReviewPresentationReady, getReviewPresentationGate } from './revi
 import { syncSessionBindingFromReview, syncSessionBindingFromSnapshot } from './session-binding.js';
 import { timestamp } from './time.js';
 import { generateWorkUnitId, normalizeWorkUnitId, readWorkUnitBinding, resolveTargetRoot, writeWorkUnitBinding } from './work-unit.js';
-import { appendDecision, appendOpenQuestions, appendProgress, appendWorkflowEvent, buildClarificationPlan, buildClarificationState, buildCurrentStateSnapshot, buildWorkflowTaskGraph, CAPTURE_SOURCES, coerceCapturedValue, deriveGateLabels, detectWorkspaceScenario, extractMarkdownSection, FIELD_PATH_TO_STATE_KEY, isSupportedProductType, loadCurrentLaneSnapshot, loadLatestVersionSnapshot, loadWorkspace, normalizeVersionId, persistWorkspaceCurrentState, readActiveRequirementLane, readVersionIndex, readVersionSnapshot, renderFlowDoc, renderHandoffDoc, renderRolesDoc, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace, writeVersionIndex, writeVersionSnapshot } from './workspace-core.js';
+import { appendDecision, appendOpenQuestions, appendProgress, appendWorkflowEvent, buildClarificationPlan, buildClarificationState, buildCurrentStateSnapshot, buildWorkflowTaskGraph, CAPTURE_SOURCES, coerceCapturedValue, deriveGateLabels, detectWorkspaceScenario, extractMarkdownSection, FIELD_PATH_TO_STATE_KEY, isSupportedProductType, loadCurrentLaneSnapshot, loadLatestVersionSnapshot, loadWorkspace, normalizeVersionId, persistWorkspaceCurrentState, readActiveRequirementLane, readVersionIndex, readVersionSnapshot, renderFlowDoc, renderHandoffDoc, renderRolesDoc, resolveActiveTemplatePack, resolveCurrentProductType, USER_CLARIFICATION_PATHS, validateWorkspace, writeVersionIndex, writeVersionSnapshot } from './workspace-core.js';
 
 function requirementGatePath(projectRoot) {
   return path.join(projectRoot, '.openprd', 'harness', 'requirement-gate.json');
@@ -192,6 +192,36 @@ function requirementGateReferenceTimestamp(gate) {
   return gate?.confirmedAt ?? gate?.updatedAt ?? gate?.openedAt ?? null;
 }
 
+function requirementNextActionBlocksSynthesize(nextAction) {
+  return nextAction === 'clarify-user' || nextAction === 'classify' || nextAction === 'interview';
+}
+
+function gateHasClarificationConfirmation(gate) {
+  return Boolean(gate?.clarificationConfirmedAt || gate?.status === 'clarification-confirmed');
+}
+
+function latestConfirmedClarificationCaptureTimestamp(currentState) {
+  const timestamps = Object.entries(currentState?.captureMeta ?? {})
+    .filter(([field, entry]) => USER_CLARIFICATION_PATHS.has(field) && entry?.source === 'user-confirmed')
+    .map(([, entry]) => entry?.capturedAt)
+    .filter(Boolean)
+    .map(String);
+  return timestamps.length > 0 ? timestamps.sort().at(-1) : null;
+}
+
+function hasDerivedClarificationCaptureSince(currentState, gateAt) {
+  const reference = String(gateAt || '');
+  return Object.entries(currentState?.captureMeta ?? {}).some(([field, entry]) => {
+    if (!USER_CLARIFICATION_PATHS.has(field)) {
+      return false;
+    }
+    if (!entry?.capturedAt || String(entry.capturedAt) < reference) {
+      return false;
+    }
+    return Boolean(entry.source) && entry.source !== 'user-confirmed' && !NON_SEMANTIC_CAPTURE_SOURCES.has(entry.source);
+  });
+}
+
 function gateQuestionLimit(gate, fallback) {
   const raw = Number(gate?.approvalPolicy?.maxClarificationQuestions);
   if (!Number.isFinite(raw) || raw <= 0) {
@@ -210,7 +240,23 @@ function ensureFreshRequirementStateForSynthesize({ gate, currentState, override
   }
   const capturedAt = latestCaptureTimestamp(currentState);
   if (capturedAt && String(capturedAt) >= String(gateAt)) {
-    return;
+    if (!gateHasClarificationConfirmation(gate)) {
+      return;
+    }
+    const confirmedCaptureAt = latestConfirmedClarificationCaptureTimestamp(currentState);
+    const hasDerivedCapture = hasDerivedClarificationCaptureSince(currentState, gateAt);
+    if (confirmedCaptureAt && String(confirmedCaptureAt) >= String(gateAt) && !hasDerivedCapture) {
+      return;
+    }
+    throw new Error([
+      'OpenPrd 已阻止 synthesize：当前需求摘要虽已确认，但 current.json 还没有把本轮确认内容稳定写回。',
+      hasDerivedCapture
+        ? '检测到本轮仍有 user clarification 字段被写成 agent-inferred / project-derived；请先改用 openprd capture 按 canonical 字段路径并以 user-confirmed 写回，再继续 synthesize。'
+        : '请先用 openprd capture 按 canonical 字段路径并以 user-confirmed 写回本轮确认事实，再继续 synthesize。',
+      hasSynthesizeContentOverrides(overrides)
+        ? 'partial override 不能替代这一步 requirement write-back。'
+        : null,
+    ].filter(Boolean).join(' '));
   }
   throw new Error([
     'OpenPrd 已阻止 synthesize：当前有新的需求入口，但 current.json 还没有记录本轮确认答案。',
@@ -218,6 +264,27 @@ function ensureFreshRequirementStateForSynthesize({ gate, currentState, override
       ? '当前 requirement gate 处于进行中，partial override 不能替代 fresh capture；请先用 openprd capture 写入本轮目标、问题、范围和验收信息。'
       : '请先用 openprd capture 写入本轮目标、问题、范围和验收信息。',
   ].join(' '));
+}
+
+async function ensureRequirementLaneReadyForSynthesize(ws) {
+  const guidance = await computeWorkspaceGuidance(ws, { questionLimit: 5 });
+  const missingRequiredFields = Number(guidance.analysis?.missingRequiredFields ?? 0);
+  const lacksProductType = !guidance.analysis?.productType;
+  const blockedByStructuredGap = guidance.nextAction === 'classify'
+    || guidance.nextAction === 'interview'
+    || (guidance.nextAction === 'clarify-user' && (lacksProductType || missingRequiredFields > 0));
+  if (!blockedByStructuredGap) {
+    return;
+  }
+  throw new Error([
+    'OpenPrd 已阻止 synthesize：当前 requirement lane 还没有离开需求补齐阶段。',
+    `当前下一步仍是 ${guidance.nextAction}。`,
+    guidance.reason ? `原因: ${guidance.reason}` : null,
+    guidance.suggestedCommand ? `建议先执行: ${guidance.suggestedCommand}。` : null,
+    Array.isArray(guidance.suggestedQuestions) && guidance.suggestedQuestions.length > 0
+      ? `优先补齐: ${guidance.suggestedQuestions.slice(0, 2).join('；')}。`
+      : null,
+  ].filter(Boolean).join(' '));
 }
 
 function resolveReviewPaths(ws, snapshot) {
@@ -383,7 +450,6 @@ function detectRequirementIntakeComplexity(gate) {
   ];
   const simpleConcretePatterns = [
     /按钮|文案|颜色|圆角|位置|间距|字号|图标|标题|空格|标点|错别字|拼写|label|copy/i,
-    /红圈|描边|边框|卡片|平铺|去掉|去除|移除|隐藏|对齐|留白|背景/,
     /从.+(改到|移到|移动到|换到|变成|改成|改为).+/,
   ];
   const reasons = [];
@@ -553,7 +619,7 @@ function describeProductLensFocus(productType) {
 function requirementTypeDisplay(gate) {
   const tier = String(gate?.intent?.requirementTier ?? '').toLowerCase();
   if (tier === 'l0') {
-    return '快速修正（L0）';
+    return '直接处理（L0）';
   }
   if (tier === 'l1') {
     return '现有功能优化（L1）';
@@ -1226,11 +1292,15 @@ async function synthesizeWorkspace(projectRoot, overrides = {}) {
   if (!(await exists(ws.workspaceRoot))) {
     throw new Error(`Missing workspace: ${ws.workspaceRoot}`);
   }
+  const requirementGate = await readActiveRequirementGate(projectRoot);
   ensureFreshRequirementStateForSynthesize({
-    gate: await readActiveRequirementGate(projectRoot),
+    gate: requirementGate,
     currentState: ws.data.currentState ?? {},
     overrides,
   });
+  if (requirementGate?.active && gateHasClarificationConfirmation(requirementGate)) {
+    await ensureRequirementLaneReadyForSynthesize(ws);
+  }
 
   const versionIndex = await readVersionIndex(ws);
   const nextVersionNumber = overrides.versionNumber ?? (versionIndex.length > 0

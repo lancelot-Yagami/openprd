@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { reviewKnowledgeWorkspace } from '../src/knowledge.js';
 import {
   buildCodeExtensionCandidate,
   initGrowthWorkspace,
@@ -144,6 +145,10 @@ test('quality verify writes html eval report and learn creates experience skill'
   assert.deepEqual(quality.report.qualityPolicy.requiredGates, ['smoke', 'feature-coverage', 'knowledge', 'growth']);
   assert.equal(quality.report.readiness.productionReady, true);
   assert.equal(quality.knowledgeReview.skipped, false);
+  assert.equal(quality.knowledgeReview.status, 'pending-review');
+  assert.ok(quality.knowledgeReview.userFacingExperience.message.includes('这次我观察到一个以后可能重复出现的情况：'));
+  assert.ok(quality.knowledgeReview.userFacingExperience.message.includes('这条经验只会保留在当前项目里。'));
+  assert.ok(quality.knowledgeReview.userFacingExperience.question?.includes('要我把它一起保留下来吗'));
   assert.equal(quality.growthCheckpoint.recorded || quality.growthCheckpoint.reason === 'duplicate-checkpoint', true);
   assert.equal(quality.report.gates.some((gate) => gate.id === 'knowledge' && gate.status === 'pass'), true);
   assert.equal(quality.report.gates.some((gate) => gate.id === 'growth' && gate.status === 'pass'), true);
@@ -171,6 +176,8 @@ test('quality verify writes html eval report and learn creates experience skill'
   const learned = await learnQualityWorkspace(project, { from: quality.reportPath });
   assert.equal(learned.ok, true);
   assert.ok(learned.files.skill.endsWith('SKILL.md'));
+  assert.doesNotMatch(learned.skillName, /eval-/);
+  assert.doesNotMatch(learned.skillName, /candidate-eval-/);
   const skill = await fs.readFile(learned.files.skill, 'utf8');
   assert.ok(skill.includes('## 触发条件'));
   assert.ok(skill.includes('## 适用范围'));
@@ -178,8 +185,87 @@ test('quality verify writes html eval report and learn creates experience skill'
   assert.ok(skill.includes('## 典型输出'));
   assert.ok(skill.includes('## 关联字段'));
   assert.ok(skill.includes('## 先看哪些证据'));
+  assert.doesNotMatch(skill, /\.openprd\/quality\/reports\//);
+  assert.doesNotMatch(skill, /candidate-eval-/);
   const index = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'knowledge', 'index.json'), 'utf8'));
   assert.equal(index.skills[0].skillName, learned.skillName);
+});
+
+test('knowledge review reuses the same candidate id within one turn instead of promoting a later weaker doc-only candidate', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'agent' });
+  await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  await fs.mkdir(path.join(project, 'docs', 'basic'), { recursive: true });
+  await fs.writeFile(path.join(project, 'src', 'main.js'), 'export const main = true;\n');
+  await fs.writeFile(path.join(project, 'docs', 'basic', 'learning.md'), '# learning\n');
+
+  const turnStatePath = path.join(project, '.openprd', 'harness', 'turn-state.json');
+  await fs.writeFile(turnStatePath, `${JSON.stringify({
+    version: 1,
+    id: 'turn-knowledge-reuse',
+    prompt: '继续把这轮实现收口，并整理成后续可复用经验。',
+    touchedFiles: ['src/main.js'],
+    reviewSignals: [
+      {
+        id: 'run-verify-pass',
+        kind: 'run-verify',
+        ok: true,
+        productionReady: true,
+        summary: 'current task is ready for reuse',
+        touchedFiles: ['src/main.js'],
+      },
+    ],
+  }, null, 2)}\n`);
+
+  const firstReview = await reviewKnowledgeWorkspace(project, {
+    from: '.openprd/harness/turn-state.json',
+    touchedFiles: ['src/main.js'],
+    signal: {
+      id: 'run-verify-pass',
+      kind: 'run-verify',
+      ok: true,
+      productionReady: true,
+      summary: 'current task is ready for reuse',
+      touchedFiles: ['src/main.js'],
+    },
+  });
+  assert.equal(firstReview.ok, true);
+  assert.equal(firstReview.skipped, false);
+
+  await fs.writeFile(turnStatePath, `${JSON.stringify({
+    version: 1,
+    id: 'turn-knowledge-reuse',
+    knowledgeCandidateId: firstReview.candidateId,
+    prompt: '继续把这轮实现收口，并整理成后续可复用经验。',
+    touchedFiles: ['docs/basic/learning.md'],
+    reviewSignals: [
+      {
+        id: 'run-verify-pass-docs',
+        kind: 'run-verify',
+        ok: true,
+        productionReady: true,
+        summary: 'docs follow-up is also ready',
+        touchedFiles: ['docs/basic/learning.md'],
+      },
+    ],
+  }, null, 2)}\n`);
+
+  const secondReview = await reviewKnowledgeWorkspace(project, {
+    from: '.openprd/harness/turn-state.json',
+    touchedFiles: ['docs/basic/learning.md'],
+    signal: {
+      id: 'run-verify-pass-docs',
+      kind: 'run-verify',
+      ok: true,
+      productionReady: true,
+      summary: 'docs follow-up is also ready',
+      touchedFiles: ['docs/basic/learning.md'],
+    },
+  });
+  assert.equal(secondReview.ok, true);
+  assert.equal(secondReview.skipped, false);
+  assert.equal(secondReview.candidateId, firstReview.candidateId);
+  assert.doesNotMatch(secondReview.skillName, /learning/);
 });
 
 test('quality learn can digest diagnostic bundles and observability recognizes diagnostic surfaces', async () => {
@@ -840,6 +926,114 @@ test('standards require concrete docs plus file and folder manuals for source fi
   assert.ok(passed.checks.some((check) => check.includes('文件夹说明书: 1/1。')));
 });
 
+test('standards prefer package.json name over worktree folder name for folder manuals', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+  await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({ name: 'moticlaw', type: 'module' }, null, 2)}\n`);
+  await writeConcreteBasicDocs(project, 'src/app.js');
+  await writeSourceManual(path.join(project, 'src', 'app.js'), 'export const app = true;');
+  await fs.writeFile(path.join(project, 'src', 'moticlaw_src_README.md'), [
+    '# src 文件夹说明书',
+    '',
+    '## 核心功能',
+    '承载示例源码。',
+    '',
+    '## 输入',
+    '开发者编辑源码。',
+    '',
+    '## 输出',
+    '对外提供示例入口。',
+    '',
+    '## 定位',
+    '项目源码目录。',
+    '',
+    '## 依赖',
+    '无。',
+    '',
+    '## 维护规则',
+    '- 新增源码后更新本文档。',
+    '',
+  ].join('\n'));
+
+  const passed = await checkStandardsWorkspace(project);
+  assert.equal(passed.ok, true);
+  assert.ok(passed.checks.some((check) => check.includes('文件夹说明书: 1/1。')));
+});
+
+test('standards allow folder manual moduleName override when package name differs', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+  await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({ name: '@scope/wrong-name', type: 'module' }, null, 2)}\n`);
+  await writeConcreteBasicDocs(project, 'src/app.js');
+  await writeSourceManual(path.join(project, 'src', 'app.js'), 'export const app = true;');
+  const configPath = path.join(project, '.openprd', 'standards', 'config.json');
+  const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+  config.folderManual.moduleName = 'moticlaw';
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  await fs.writeFile(path.join(project, 'src', 'moticlaw_src_README.md'), [
+    '# src 文件夹说明书',
+    '',
+    '## 核心功能',
+    '承载示例源码。',
+    '',
+    '## 输入',
+    '开发者编辑源码。',
+    '',
+    '## 输出',
+    '对外提供示例入口。',
+    '',
+    '## 定位',
+    '项目源码目录。',
+    '',
+    '## 依赖',
+    '无。',
+    '',
+    '## 维护规则',
+    '- 新增源码后更新本文档。',
+    '',
+  ].join('\n'));
+
+  const passed = await checkStandardsWorkspace(project);
+  assert.equal(passed.ok, true);
+  assert.ok(passed.checks.some((check) => check.includes('文件夹说明书: 1/1。')));
+});
+
+test('standards use the normalized module name for the project root folder manual', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+  await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({ name: 'moticlaw', type: 'module' }, null, 2)}\n`);
+  await writeConcreteBasicDocs(project, 'root-entry.js');
+  await writeSourceManual(path.join(project, 'root-entry.js'), 'export const rootEntry = true;');
+  await fs.writeFile(path.join(project, 'moticlaw_moticlaw_README.md'), [
+    '# 项目根目录说明书',
+    '',
+    '## 核心功能',
+    '承载项目级源码与配置入口。',
+    '',
+    '## 输入',
+    '开发者维护项目根目录文件。',
+    '',
+    '## 输出',
+    '对外提供项目级入口。',
+    '',
+    '## 定位',
+    '项目根目录。',
+    '',
+    '## 依赖',
+    'Node.js 运行时。',
+    '',
+    '## 维护规则',
+    '新增根目录源码后更新本说明书。',
+    '',
+  ].join('\n'));
+
+  const passed = await checkStandardsWorkspace(project);
+  assert.equal(passed.ok, true);
+  assert.ok(passed.checks.some((check) => check.includes('文件夹说明书: 1/1。')));
+});
+
 test('dev-check reports code file line status and next actions', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'consumer' });
@@ -1010,6 +1204,61 @@ test('Stop hook injects dev-check wrap-up table for touched large files', async 
   assert.match(payload.hookSpecificOutput.additionalContext, /src\/large\.js/);
   assert.match(payload.hookSpecificOutput.additionalContext, /🟠 中风险｜建议优先关注/);
   assert.match(payload.hookSpecificOutput.additionalContext, /1501 行（> 1500 行\/文件）/);
+});
+
+test('Stop hook asks for project-level experience in structured plain language', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+  await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  await fs.writeFile(path.join(project, 'src', 'experience.js'), 'export const experience = true;\n');
+
+  await fs.writeFile(path.join(project, '.openprd', 'harness', 'turn-state.json'), `${JSON.stringify({
+    version: 1,
+    id: 'turn-project-experience',
+    prompt: '把这次收尾体验也一起优化掉。',
+    touchedFiles: ['src/experience.js'],
+    reviewSignals: [
+      {
+        id: 'run-verify-pass',
+        kind: 'run-verify',
+        ok: true,
+        productionReady: true,
+        summary: '本轮收尾方式已经稳定，可作为后续默认处理方式',
+        touchedFiles: ['src/experience.js'],
+      },
+    ],
+  }, null, 2)}\n`);
+  await fs.writeFile(path.join(project, '.openprd', 'knowledge', 'review-signals.jsonl'), `${JSON.stringify({
+    id: 'run-verify-pass',
+    kind: 'run-verify',
+    ok: true,
+    productionReady: true,
+    summary: '本轮收尾方式已经稳定，可作为后续默认处理方式',
+    touchedFiles: ['src/experience.js'],
+  })}\n`);
+
+  const stop = spawnSync(process.execPath, [path.join(project, '.codex', 'hooks', 'openprd-hook.mjs'), 'Stop'], {
+    cwd: project,
+    input: JSON.stringify({
+      cwd: project,
+      hook_event_name: 'Stop',
+    }),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      OPENPRD_CLI: path.resolve('openprd/bin/openprd.js'),
+    },
+  });
+  assert.equal(stop.status, 0);
+  const payload = JSON.parse(stop.stdout);
+  const context = payload.hookSpecificOutput.additionalContext;
+  assert.equal(payload.continue, true);
+  assert.match(context, /这次我观察到一个以后可能重复出现的情况：/);
+  assert.match(context, /我计划保留一条项目经验：/);
+  assert.match(context, /这条经验只会保留在当前项目里。/);
+  assert.match(context, /要我把它一起保留下来吗？/);
+  assert.doesNotMatch(context, /Draft Skill:/);
+  assert.doesNotMatch(context, /Promote:/);
 });
 
 test('dev-check wrap-up copy script keeps copy compact', () => {

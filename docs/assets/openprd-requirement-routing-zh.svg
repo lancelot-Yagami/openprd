@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
   <title id="title">OpenPrd 需求分流节奏</title>
-  <desc id="desc">一张说明 OpenPrd 如何把用户需求分成快速修正、现有功能优化和新功能新流程方案的流程图。</desc>
+  <desc id="desc">一张说明 OpenPrd 如何把用户需求分成直接处理、现有功能优化和新功能新流程方案的流程图。</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#fff8f1"/>
@@ -40,7 +40,7 @@
     <rect width="420" height="280" rx="22" fill="#ffffff" stroke="#fdba74" stroke-width="2"/>
     <rect x="30" y="28" width="104" height="38" rx="19" fill="#f97316"/>
     <text class="pill" x="62" y="53">01</text>
-    <text class="card-title" x="30" y="108">快速修正</text>
+    <text class="card-title" x="30" y="108">直接处理</text>
     <text class="card-body" x="30" y="152">问题已经很明确</text>
     <text class="card-body" x="30" y="184">影响小，验收也清楚</text>
     <text class="card-body" x="30" y="216">通常直接处理</text>

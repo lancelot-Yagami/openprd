@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-05 09:05:29",
+  "updatedAt": "2026-06-07 12:49:34",
   "incidents": [
     {
       "incidentId": "incident-candidate-turn-1780116203372-5f266a79e968c758",
@@ -22,26 +22,399 @@
       "skillName": "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
       "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/skills/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md",
       "sourceKind": "diagnostic-bundle",
-      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758"
+      "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758",
+      "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
+      "candidateIds": [
+        "candidate-turn-1780116203372-5f266a79e968c758"
+      ],
+      "categories": [
+        "hidden-debug-knowledge",
+        "agent-misjudgment",
+        "high-impact-fix"
+      ],
+      "triggerHints": [
+        "本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。",
+        "这次改动直接影响 Agent / harness / hook / skill 行为，后续很容易再次踩到同类判断问题。",
+        "dev-check attention=2, warning=2",
+        "quality needs-attention",
+        "这次修复已经带有验证或收尾证据，适合尽快抽象成项目级研发经验。",
+        "dev-check attention=3, warning=5",
+        "quality production-ready",
+        "run verify passed"
+      ],
+      "touchedFiles": [
+        "AGENTS.md",
+        "skills/openprd-requirement-intake/SKILL.md",
+        "skills/openprd-harness/SKILL.md",
+        "skills/openprd-shared/SKILL.md",
+        "src/agent-integration.js",
+        "src/codex-hook-runner-template.mjs",
+        "test/openprd-agent-integration.test.js",
+        "test/requirement-gate.test.js",
+        "src/knowledge.js",
+        "src/quality-learning.js",
+        "src/quality.js",
+        "test/openprd-quality-standards.test.js",
+        "package.json",
+        "scripts/dev-check-wrapup-copy.mjs",
+        "scripts/openprd-dev-check.mjs",
+        "scripts/openprd-github-release-notes.mjs",
+        "scripts/openprd-review-presentation.mjs",
+        "scripts/quality-perf-check.mjs",
+        "src/benchmark/constants.js",
+        "src/benchmark/operations.js",
+        "src/benchmark/registry.js",
+        "src/benchmark/render.js"
+      ],
+      "evidencePaths": [
+        ".openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/diagnostic-report.json",
+        ".openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/root-cause-candidates.json",
+        ".openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/timeline.json",
+        ".openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/candidate.json",
+        "AGENTS.md",
+        "skills/openprd-requirement-intake/SKILL.md",
+        "skills/openprd-harness/SKILL.md",
+        "skills/openprd-shared/SKILL.md",
+        "src/agent-integration.js",
+        "src/codex-hook-runner-template.mjs",
+        "test/openprd-agent-integration.test.js",
+        "test/requirement-gate.test.js",
+        "src/knowledge.js",
+        "src/quality-learning.js",
+        "src/quality.js",
+        "test/openprd-quality-standards.test.js",
+        "package.json",
+        "scripts/dev-check-wrapup-copy.mjs",
+        "scripts/openprd-dev-check.mjs",
+        "scripts/openprd-github-release-notes.mjs",
+        "scripts/openprd-review-presentation.mjs",
+        "scripts/quality-perf-check.mjs",
+        "src/benchmark/constants.js",
+        "src/benchmark/operations.js"
+      ],
+      "rootCauseLabels": [
+        "Inspect AGENTS.md",
+        "Inspect skills/openprd-requirement-intake/SKILL.md",
+        "Inspect skills/openprd-harness/SKILL.md",
+        "Inspect skills/openprd-shared/SKILL.md",
+        "Inspect src/agent-integration.js",
+        "Inspect src/codex-hook-runner-template.mjs",
+        "Inspect test/openprd-agent-integration.test.js",
+        "Inspect test/requirement-gate.test.js",
+        "Inspect src/knowledge.js",
+        "Inspect src/quality-learning.js",
+        "Inspect src/quality.js",
+        "Inspect test/openprd-quality-standards.test.js",
+        "Inspect package.json",
+        "Inspect scripts/dev-check-wrapup-copy.mjs",
+        "Inspect scripts/openprd-dev-check.mjs",
+        "Inspect scripts/openprd-github-release-notes.mjs",
+        "Inspect scripts/openprd-review-presentation.mjs",
+        "Inspect scripts/quality-perf-check.mjs",
+        "Inspect src/benchmark/constants.js",
+        "Inspect src/benchmark/operations.js",
+        "Inspect src/benchmark/registry.js",
+        "Inspect src/benchmark/render.js"
+      ],
+      "description": "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+      "summary": "本轮围绕 8 个可沉淀文件生成回顾。 本轮结果里已经出现可复用的症状、排查线索或根因模式，不应该只留在当前对话里。 已记录 2 条回顾信号。",
+      "adoption": {
+        "hitCount": 6,
+        "referencedCount": 6,
+        "injectedCount": 0,
+        "lastHitAt": "2026-06-07 12:43:49",
+        "lastReferencedAt": "2026-06-07 12:43:49",
+        "lastInjectedAt": null,
+        "lastSource": "run-context",
+        "recentEvents": [
+          {
+            "at": "2026-06-07 12:43:49",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-07 12:43:49",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-07 01:04:17",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-07 01:04:17",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-07 00:36:29",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-07 00:36:29",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 23:29:25",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 23:29:25",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 23:03:21",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 23:03:21",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 22:43:23",
+            "stage": "referenced",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          },
+          {
+            "at": "2026-06-06 22:43:23",
+            "stage": "hit",
+            "source": "run-context",
+            "sessionId": null,
+            "promptPreview": null,
+            "matchSummary": "命中 openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758 / 由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。 / Inspect skills/openprd-requirement-intake/SKILL.md",
+            "matchedOn": [
+              "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
+              "由 OpenPrd 从 diagnostic-bundle 自动沉淀的项目级排查经验。目标是在相似问题再次出现时优先复用现有诊断证据，而不是临时补日志。",
+              "Inspect skills/openprd-requirement-intake/SKILL.md",
+              "Inspect skills/openprd-harness/SKILL.md"
+            ]
+          }
+        ]
+      }
     }
   ],
   "candidates": [
     {
+      "candidateId": "candidate-eval-20260607124349",
+      "status": "pending-review",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-eval-20260607124349/candidate.json",
+      "sourceKind": "diagnostic-report",
+      "sourceRef": "candidate-eval-20260607124349",
+      "title": "本轮项目回顾",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260607124349/SKILL.md"
+    },
+    {
+      "candidateId": "candidate-eval-20260607010417",
+      "status": "pending-review",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-eval-20260607010417/candidate.json",
+      "sourceKind": "diagnostic-report",
+      "sourceRef": "candidate-eval-20260607010417",
+      "title": "本轮项目回顾",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260607010417/SKILL.md"
+    },
+    {
+      "candidateId": "candidate-eval-20260606232925",
+      "status": "pending-review",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-eval-20260606232925/candidate.json",
+      "sourceKind": "diagnostic-report",
+      "sourceRef": "candidate-eval-20260606232925",
+      "title": "本轮项目回顾",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260606232925/SKILL.md"
+    },
+    {
+      "candidateId": "candidate-eval-20260606230321",
+      "status": "pending-review",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-eval-20260606230321/candidate.json",
+      "sourceKind": "diagnostic-report",
+      "sourceRef": "candidate-eval-20260606230321",
+      "title": "本轮项目回顾",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260606230321/SKILL.md"
+    },
+    {
       "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
       "status": "promoted",
-      "path": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/candidate.json",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-turn-1780116203372-5f266a79e968c758/candidate.json",
       "sourceKind": "diagnostic-report",
       "sourceRef": "candidate-turn-1780116203372-5f266a79e968c758",
       "title": "本轮项目回顾",
-      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md"
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md"
+    },
+    {
+      "candidateId": "candidate-doctor-passed",
+      "status": "pending-review",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/candidates/candidate-doctor-passed/candidate.json",
+      "sourceKind": "completion-review",
+      "sourceRef": "candidate-doctor-passed",
+      "title": "doctor passed",
+      "draftSkillPath": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-doctor-passed/SKILL.md"
     }
   ],
   "drafts": [
     {
+      "skillName": "openprd-experience-diagnostic-candidate-eval-20260607124349",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260607124349/SKILL.md",
+      "candidateId": "candidate-eval-20260607124349",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-quality-candidate-eval-20260607124349",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-quality-candidate-eval-20260607124349/SKILL.md",
+      "candidateId": "candidate-eval-20260607124349",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-eval-20260607010417",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260607010417/SKILL.md",
+      "candidateId": "candidate-eval-20260607010417",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-quality-candidate-eval-20260607010417",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-quality-candidate-eval-20260607010417/SKILL.md",
+      "candidateId": "candidate-eval-20260607010417",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-eval-20260606232925",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260606232925/SKILL.md",
+      "candidateId": "candidate-eval-20260606232925",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-quality-candidate-eval-20260606232925",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-quality-candidate-eval-20260606232925/SKILL.md",
+      "candidateId": "candidate-eval-20260606232925",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-eval-20260606230321",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-eval-20260606230321/SKILL.md",
+      "candidateId": "candidate-eval-20260606230321",
+      "status": "pending-review"
+    },
+    {
+      "skillName": "openprd-experience-quality-candidate-eval-20260606230321",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-quality-candidate-eval-20260606230321/SKILL.md",
+      "candidateId": "candidate-eval-20260606230321",
+      "status": "pending-review"
+    },
+    {
       "skillName": "openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758",
-      "path": "/Users/chaojifeng/Projects/harness-engineer/.worktrees/openprd-release-0.1.5-publish/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-turn-1780116203372-5f266a79e968c758/SKILL.md",
       "candidateId": "candidate-turn-1780116203372-5f266a79e968c758",
       "status": "promoted"
+    },
+    {
+      "skillName": "openprd-experience-diagnostic-candidate-doctor-passed",
+      "path": "/Users/chaojifeng/Projects/harness-engineer/openprd/.openprd/knowledge/drafts/openprd-experience-diagnostic-candidate-doctor-passed/SKILL.md",
+      "candidateId": "candidate-doctor-passed",
+      "status": "pending-review"
     }
   ]
 }

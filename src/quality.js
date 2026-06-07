@@ -1444,7 +1444,7 @@ export async function learnQualityWorkspace(projectRoot, options = {}) {
     };
   }
   const source = resolved.source;
-  const { incidentId, patternId, skillName } = deriveKnowledgeNames(source);
+  const { incidentId, patternId, skillName } = deriveKnowledgeNames(source, { stablePattern: true });
   const incidentPath = qualityPath(projectRoot, cjoin(KNOWLEDGE_DIR, 'incidents', `${incidentId}.json`));
   const patternPath = qualityPath(projectRoot, cjoin(KNOWLEDGE_DIR, 'patterns', `${patternId}.json`));
   const skillDir = qualityPath(projectRoot, cjoin(KNOWLEDGE_DIR, 'skills', skillName));

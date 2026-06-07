@@ -2003,6 +2003,7 @@ export {
   coerceCapturedValue,
   computeWorkspaceDigest,
   CORE_TEMPLATE_FILES,
+  USER_CLARIFICATION_PATHS,
   deriveGateLabels,
   detectWorkspaceScenario,
   ensureWorkspaceSkeleton,

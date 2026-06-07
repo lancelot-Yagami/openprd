@@ -644,6 +644,29 @@ function summarizeReviewSignalKinds(reviewSignals = []) {
   return uniq(reviewSignals.map((signal) => signal.kind).filter(Boolean)).slice(0, 6);
 }
 
+function summarizeKnowledgeScenario(source = {}, candidate = null) {
+  if (source.kind === 'quality-report') {
+    return source.attentionGates.length > 0
+      ? `任务场景: 质量门禁收口（${source.attentionGates.slice(0, 4).join('、')}）`
+      : '任务场景: 质量门禁收口';
+  }
+  const topRootCause = source.rootCauseCandidates?.[0]?.title ?? null;
+  if (topRootCause) {
+    return `任务场景: ${topRootCause}`;
+  }
+  const topTrigger = normalizeStringList(source.triggers)[0] ?? null;
+  if (topTrigger) {
+    return `任务场景: ${topTrigger}`;
+  }
+  const fallbackTitle = firstString(candidate?.title, source.title);
+  return fallbackTitle ? `任务场景: ${fallbackTitle}` : null;
+}
+
+function summarizeEvidenceKinds(evidenceSources = []) {
+  const kinds = uniq(evidenceSources.map((item) => firstString(item.kind)).filter(Boolean));
+  return kinds.length > 0 ? `已有证据类型: ${kinds.join('、')}` : null;
+}
+
 function buildKnowledgeAbstraction({
   candidate,
   source,
@@ -670,20 +693,18 @@ function buildKnowledgeAbstraction({
     ...source.verificationSteps,
   ]).slice(0, 8);
   const typicalInputs = uniq([
-    firstString(source.title, candidate.title) ? `任务摘要: ${firstString(source.title, candidate.title)}` : null,
+    summarizeKnowledgeScenario(source, candidate),
     touchedFiles.length > 0 ? `相关文件: ${touchedFiles.slice(0, 6).join('、')}` : null,
-    source.evidenceSources.length > 0
-      ? `已有证据: ${source.evidenceSources.slice(0, 4).map((item) => `${item.kind}:${item.path}`).join('；')}`
-      : null,
+    summarizeEvidenceKinds(source.evidenceSources),
     reviewSignals.length > 0
       ? `验证信号: ${summarizeReviewSignalKinds(reviewSignals).join('、')}`
       : null,
   ]).slice(0, 6);
   const typicalOutputs = uniq([
-    relativeCandidateDir ? `knowledge candidate: ${relativeCandidateDir}/candidate.json` : null,
-    relativeCandidateDir ? `诊断报告: ${relativeCandidateDir}/diagnostic-report.json` : null,
-    relativeDraftSkillPath ? `draft skill: ${relativeDraftSkillPath}` : null,
+    relativeCandidateDir ? '项目经验候选与诊断包' : null,
+    relativeDraftSkillPath ? '待确认的项目经验草案' : null,
     verificationSteps[0] ? `验证结论: ${verificationSteps[0]}` : null,
+    '可复用的验证链路与收尾动作',
   ]).slice(0, 6);
   return {
     triggerConditions,
@@ -707,13 +728,37 @@ function categoryReason(category) {
   return '这次实现已经具备沉淀项目经验的价值。';
 }
 
-function deriveKnowledgeNames(source) {
+function deriveStablePatternKey(source = {}) {
+  if (source.kind === 'quality-report') {
+    const gates = normalizeStringList(source.attentionGates);
+    if (gates.length > 0) {
+      return gates.slice(0, 4).join('-');
+    }
+    return 'quality-closeout';
+  }
+  const rootCauseLabels = normalizeStringList(source.rootCauseCandidates?.map((item) => item.title));
+  if (rootCauseLabels.length > 0) {
+    return rootCauseLabels.slice(0, 3).join('-');
+  }
+  const triggers = normalizeStringList(source.triggers);
+  if (triggers.length > 0) {
+    return triggers.slice(0, 4).join('-');
+  }
+  if (source.abstractPattern) {
+    return source.abstractPattern;
+  }
+  return firstString(source.title, source.sourceId, source.status, 'diagnostic') ?? 'diagnostic';
+}
+
+function deriveKnowledgeNames(source, options = {}) {
   const sourceRef = source?.sourceId ?? source?.title ?? source?.status ?? 'diagnostic';
   const sourceKind = source?.kind === 'quality-report' ? 'quality' : 'diagnostic';
+  const stablePattern = options.stablePattern !== false;
   const incidentId = source?.kind === 'quality-report'
     ? `incident-${sourceRef}`
     : `incident-${slugify(sourceRef, 'diagnostic')}`;
-  const patternId = `${sourceKind}-${slugify(sourceRef, sourceKind)}`;
+  const patternSeed = stablePattern ? deriveStablePatternKey(source) : sourceRef;
+  const patternId = `${sourceKind}-${slugify(patternSeed, sourceKind)}`;
   const skillName = `openprd-experience-${slugify(patternId)}`;
   return { incidentId, patternId, skillName };
 }
@@ -1292,7 +1337,7 @@ export async function reviewKnowledgeWorkspace(projectRoot, options = {}) {
     ? (rawCandidateRef.startsWith('candidate-') ? rawCandidateRef : `candidate-${slugify(rawCandidateRef, 'knowledge')}`)
     : `candidate-${slugify(source.sourceId ?? title, 'knowledge')}`;
   const promotedSource = { ...source, sourceId: candidateId };
-  const names = deriveKnowledgeNames(promotedSource);
+  const names = deriveKnowledgeNames(promotedSource, { stablePattern: false });
   const candidateDir = knowledgePath(projectRoot, cjoin(KNOWLEDGE_CANDIDATES_DIR, candidateId));
   const candidatePath = path.join(candidateDir, 'candidate.json');
   const diagnosticReportPath = path.join(candidateDir, 'diagnostic-report.json');
@@ -1387,6 +1432,17 @@ export async function reviewKnowledgeWorkspace(projectRoot, options = {}) {
       status: candidate.status,
     }),
   });
+  if (turnStateSource && await exists(knowledgePath(projectRoot, turnStateSource))) {
+    const turnState = await readJson(knowledgePath(projectRoot, turnStateSource)).catch(() => null);
+    const currentTurnState = readJsonObject(turnState);
+    if (currentTurnState) {
+      await writeJson(knowledgePath(projectRoot, turnStateSource), {
+        ...currentTurnState,
+        knowledgeCandidateId: candidateId,
+        updatedAt: timestamp(),
+      }).catch(() => null);
+    }
+  }
 
   return {
     ok: true,
