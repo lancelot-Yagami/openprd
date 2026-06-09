@@ -181,7 +181,7 @@ automatically.
 - **Project knowledge skills**: turn verified fixes and recurring diagnosis patterns into reusable `.openprd/knowledge/skills/` experience skills
 - **OpenPrd change and task execution**: materialize PRD snapshots into change files, validate them, apply accepted specs, archive changes, and advance structured tasks by dependency order
 - **Long-running agent loop**: turn accepted change tasks into one-task-per-session Codex or Claude execution prompts with verification, progress logs, and optional task commits
-- **Default agent integration**: generate Codex, Claude, and Cursor guidance from one OpenPrd source, including Codex hooks with `codex_hooks = true`
+- **Default agent integration**: generate Codex, Claude, and Cursor guidance from one OpenPrd source, including Codex hooks with `hooks = true`
 - **Agent harness skills**: repo-local skills for shared rules, workflow control, and diagram review
 
 ## Tech Stack
@@ -249,7 +249,7 @@ If `openprd` is not on `PATH` yet, run the same init command through `npx`:
 npx @openprd/cli@latest init /path/to/project --template-pack agent
 ```
 
-`init` creates `.openprd/`, `docs/basic/`, `AGENTS.md`, and generated Codex / Claude / Cursor guidance. Codex projects also get `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/openprd-hook.mjs`, and user-level Codex `codex_hooks = true`.
+`init` creates `.openprd/`, `docs/basic/`, `AGENTS.md`, and generated Codex / Claude / Cursor guidance. Codex projects also get `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/openprd-hook.mjs`, and user-level Codex `hooks = true`.
 
 Codex hooks default to `lite`: `UserPromptSubmit`, a lightweight `PreToolUse`
 write gate, and a lightweight `Stop` end-of-turn review. Context is injected for prompts that explicitly mention OpenPrd,
@@ -639,7 +639,7 @@ or `openprd setup` inside a project.
 
 - `AGENTS.md` managed OpenPrd rules
 - `.codex/skills/`, `.codex/prompts/`, `.codex/config.toml`, `.codex/hooks.json`, and `.codex/hooks/openprd-hook.mjs`
-- user-level Codex config with `features.codex_hooks = true`
+- user-level Codex config with `features.hooks = true`
 - `.claude/skills/`, `.claude/commands/openprd/`, and `CLAUDE.md`
 - `.cursor/rules/openprd.mdc` and `.cursor/commands/`
 - `.openprd/harness/install-manifest.json`, `hook-state.json`, `events.jsonl`, `drift-report.json`, and `visual-reviews/`

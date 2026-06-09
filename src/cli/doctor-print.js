@@ -200,17 +200,32 @@ function printSelfUpdateResult(result, json) {
     return;
   }
 
-  const status = result.dryRun
-    ? '预演'
-    : result.ok
-      ? '完成'
-      : result.skipped
-        ? '已跳过'
-        : '失败';
+  const status = result.checkOnly
+    ? result.ok ? '检查完成' : '检查失败'
+    : result.dryRun
+      ? '预演'
+      : result.ok
+        ? '完成'
+        : result.skipped
+          ? '已跳过'
+          : '失败';
   console.log(`OpenPrd self-update: ${status}`);
   console.log(`当前版本: ${result.package?.version ?? 'unknown'}`);
+  if (result.publishedVersion) {
+    console.log(`已发布版本: ${result.publishedVersion}`);
+  }
+  if (result.comparison === 'behind') {
+    console.log('版本关系: 当前安装版本落后于 npm 已发布版本');
+  } else if (result.comparison === 'same') {
+    console.log('版本关系: 当前安装版本已经是 npm 最新版本');
+  } else if (result.comparison === 'ahead') {
+    console.log('版本关系: 当前安装版本高于 npm 已发布版本');
+  }
   console.log(`安装源: ${result.source}`);
-  console.log(`计划命令: ${result.installCommand.display}`);
+  if (result.versionCheck?.command?.display) {
+    console.log(`检查命令: ${result.versionCheck.command.display}`);
+  }
+  console.log(`计划命令: ${result.installCommand?.display ?? 'N/A'}`);
   if (result.localCheckout) {
     console.log('运行环境: 本地源码 checkout');
   }
@@ -222,6 +237,17 @@ function printSelfUpdateResult(result, json) {
   }
   if (result.resolvedExecutable?.executable) {
     console.log(`OpenPrd 可执行文件: ${result.resolvedExecutable.executable}`);
+  }
+  if (result.installedVersion?.version) {
+    console.log(`安装后版本: ${result.installedVersion.version}`);
+  }
+  if ((result.refreshCandidates?.total ?? 0) > 0) {
+    console.log(`旧项目刷新候选: ${result.refreshCandidates.total}`);
+    for (const project of result.refreshCandidates.projects ?? []) {
+      console.log(`- ${project.workspaceRoot} (${project.currentVersion} -> ${project.targetVersion}; ${project.note})`);
+    }
+  } else if (result.refreshCandidates?.ok && result.checkOnly) {
+    console.log('旧项目刷新候选: 0');
   }
   for (const action of result.nextActions ?? []) {
     console.log(`下一步: ${action}`);

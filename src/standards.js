@@ -376,7 +376,7 @@ function normalizeModuleName(raw, fallback = 'project') {
   return normalized || fallback;
 }
 
-async function resolveSourceManualModuleName(projectRoot, config = {}) {
+async function resolveSourceManualModuleName(projectRoot, config = {}, fallbackModuleName = '') {
   const configuredName = typeof config?.folderManual?.moduleName === 'string'
     ? config.folderManual.moduleName.trim()
     : '';
@@ -388,6 +388,11 @@ async function resolveSourceManualModuleName(projectRoot, config = {}) {
   const packageName = typeof packageJson?.name === 'string' ? packageJson.name.trim() : '';
   if (packageName) {
     return normalizeModuleName(packageName, normalizeModuleName(path.basename(projectRoot)));
+  }
+
+  const fallbackName = typeof fallbackModuleName === 'string' ? fallbackModuleName.trim() : '';
+  if (fallbackName) {
+    return normalizeModuleName(fallbackName, normalizeModuleName(path.basename(projectRoot)));
   }
 
   return normalizeModuleName(path.basename(projectRoot));
@@ -624,7 +629,11 @@ async function validateSourceManuals(projectRoot, errors, checks, options = {}) 
   const sourceFiles = await collectSourceFiles(projectRoot, projectRoot, [], options.ignorePatterns, discovery);
   const filesMissingManualRaw = [];
   const foldersMissingManualRaw = [];
-  const moduleName = await resolveSourceManualModuleName(projectRoot, options.config ?? {});
+  const moduleName = await resolveSourceManualModuleName(
+    projectRoot,
+    options.config ?? {},
+    options.folderManualModuleName,
+  );
 
   for (const filePath of sourceFiles) {
     const relativePath = path.relative(projectRoot, filePath);
@@ -874,7 +883,12 @@ export async function checkStandardsWorkspace(projectRoot, options = {}) {
     && config?.fileManual?.enabled !== false
     && config?.folderManual?.enabled !== false;
   const manualReport = enforceSourceManuals
-    ? await validateSourceManuals(projectRoot, errors, checks, { ignorePatterns, externalReferencePaths, config })
+    ? await validateSourceManuals(projectRoot, errors, checks, {
+      ignorePatterns,
+      externalReferencePaths,
+      config,
+      folderManualModuleName: options.folderManualModuleName,
+    })
     : {
       ignorePatterns,
       externalReferencePaths,

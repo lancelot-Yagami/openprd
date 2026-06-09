@@ -751,6 +751,146 @@ test('openprd loop plans prompts and finishes one verified task', async () => {
   assert.equal(loopStateAfterFinish.currentTaskTitle, 'Launch one-task session');
 });
 
+
+test('loop run can create an isolated worktree and record branch metadata', async () => {
+  const project = await makeTempProject();
+  await writeLoopProject(project, 'loop-worktree');
+
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'openprd@example.com'],
+    ['config', 'user.name', 'OpenPrd Test'],
+    ['add', '-A'],
+    ['commit', '-m', 'initial'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: project, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+
+  await initLoopWorkspace(project, { agent: 'codex' });
+  await planLoopWorkspace(project, { change: 'loop-worktree' });
+  const worktreePath = path.join(path.dirname(project), 'loop-worktree-runner');
+
+  const dryRun = await runLoopWorkspace(project, {
+    agent: 'claude',
+    dryRun: true,
+    worktree: worktreePath,
+    branch: 'loop/worktree-runner',
+  });
+
+  assert.equal(dryRun.ok, true);
+  assert.equal(await fs.realpath(dryRun.projectRoot), await fs.realpath(worktreePath));
+  assert.equal(dryRun.workspace.path, await fs.realpath(worktreePath));
+  assert.equal(dryRun.workspace.branch, 'loop/worktree-runner');
+  assert.equal(dryRun.workspace.created, true);
+  const branchResult = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktreePath, encoding: 'utf8' });
+  assert.equal(branchResult.status, 0, branchResult.stderr || branchResult.stdout);
+  assert.equal(branchResult.stdout.trim(), 'loop/worktree-runner');
+  const loopState = JSON.parse(await fs.readFile(path.join(worktreePath, '.openprd', 'harness', 'loop-state.json'), 'utf8'));
+  assert.equal(loopState.currentWorktreePath, await fs.realpath(worktreePath));
+  assert.equal(loopState.currentBranch, 'loop/worktree-runner');
+  assert.deepEqual(loopState.currentTaskBaselinePaths, []);
+  const sessions = await readJsonl(path.join(worktreePath, '.openprd', 'harness', 'agent-sessions.jsonl'));
+  const dryRunEvent = sessions.find((event) => event.action === 'run-dry-run');
+  assert.equal(dryRunEvent.worktreePath, await fs.realpath(worktreePath));
+  assert.equal(dryRunEvent.branch, 'loop/worktree-runner');
+  assert.equal(dryRunEvent.createdWorktree, true);
+});
+
+test('loop finish blocks commit on a dirty main workspace unless explicitly allowed', async () => {
+  const project = await makeTempProject();
+  await writeLoopProject(project, 'loop-dirty-main');
+
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'openprd@example.com'],
+    ['config', 'user.name', 'OpenPrd Test'],
+    ['add', '-A'],
+    ['commit', '-m', 'initial'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: project, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+
+  await initLoopWorkspace(project, { agent: 'codex' });
+  await planLoopWorkspace(project, { change: 'loop-dirty-main' });
+  const handlerPath = path.join(project, 'src', 'api', 'handler.js');
+  const handlerText = await fs.readFile(handlerPath, 'utf8');
+  await fs.writeFile(handlerPath, `${handlerText}\n// dirty main workspace change\n`);
+  const prompt = await promptLoopWorkspace(project, { item: 'T001.01' });
+  assert.equal(prompt.ok, true);
+
+  const finish = await finishLoopWorkspace(project, { item: 'T001.01', commit: true });
+  assert.equal(finish.ok, false);
+  assert.match(finish.errors[0], /--allow-dirty-main/);
+  assert.match(finish.errors[0], /--worktree\/--branch/);
+});
+
+test('loop finish commit scopes files inside an isolated worktree and records commit metadata', async () => {
+  const project = await makeTempProject();
+  await writeLoopProject(project, 'loop-isolated-commit');
+
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'openprd@example.com'],
+    ['config', 'user.name', 'OpenPrd Test'],
+    ['add', '-A'],
+    ['commit', '-m', 'initial'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: project, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+
+  await initLoopWorkspace(project, { agent: 'codex' });
+  await planLoopWorkspace(project, { change: 'loop-isolated-commit' });
+  const worktreePath = path.join(path.dirname(project), 'loop-isolated-commit-wt');
+
+  const prompt = await promptLoopWorkspace(project, {
+    item: 'T001.01',
+    worktree: worktreePath,
+    branch: 'loop/isolation-test',
+  });
+  assert.equal(prompt.ok, true);
+
+  const finish = await finishLoopWorkspace(project, {
+    item: 'T001.01',
+    commit: true,
+    worktree: worktreePath,
+    branch: 'loop/isolation-test',
+  });
+  assert.equal(finish.ok, true);
+  assert.equal(finish.workspace.path, await fs.realpath(worktreePath));
+  assert.equal(finish.workspace.branch, 'loop/isolation-test');
+  assert.equal(finish.commit.branch, 'loop/isolation-test');
+  assert.equal(finish.commit.worktreePath, await fs.realpath(worktreePath));
+  assert.equal(finish.commit.commitPlan.stagedPaths.includes(path.join('openprd', 'changes', 'loop-isolated-commit', 'tasks.md')), true);
+  assert.equal(finish.commit.commitPlan.excludedPaths.length, 0);
+
+  const loopState = JSON.parse(await fs.readFile(path.join(worktreePath, '.openprd', 'harness', 'loop-state.json'), 'utf8'));
+  assert.equal(loopState.currentWorktreePath, await fs.realpath(worktreePath));
+  assert.equal(loopState.currentBranch, 'loop/isolation-test');
+  assert.equal(loopState.lastCommitSha, finish.commit.sha);
+
+  const report = await fs.readFile(path.join(worktreePath, finish.testReport), 'utf8');
+  assert.match(report, /- 工作区: .*loop-isolated-commit-wt/);
+  assert.match(report, /- 分支: loop\/isolation-test/);
+  assert.match(report, new RegExp(`- 提交: ${finish.commit.sha}`));
+
+  const sessions = await readJsonl(path.join(worktreePath, '.openprd', 'harness', 'agent-sessions.jsonl'));
+  const finishEvent = sessions.find((event) => event.action === 'finish');
+  assert.equal(finishEvent.worktreePath, await fs.realpath(worktreePath));
+  assert.equal(finishEvent.branch, 'loop/isolation-test');
+  assert.equal(finishEvent.commitSha, finish.commit.sha);
+
+  const commitFiles = spawnSync('git', ['show', '--pretty=', '--name-only', 'HEAD'], { cwd: worktreePath, encoding: 'utf8' });
+  assert.equal(commitFiles.status, 0, commitFiles.stderr || commitFiles.stdout);
+  const normalizedFiles = commitFiles.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(normalizedFiles.includes(path.join('openprd', 'changes', 'loop-isolated-commit', 'tasks.md')), true);
+  const status = spawnSync('git', ['status', '--short'], { cwd: worktreePath, encoding: 'utf8' });
+  assert.equal(status.status, 0, status.stderr || status.stdout);
+  assert.equal(status.stdout.trim(), '');
+});
+
 test('loop finish with commit syncs version ledger items and keeps the local version tag on the latest commit', async () => {
   const project = await makeTempProject();
   await writeLoopProject(project, 'loop-release');
@@ -768,6 +908,12 @@ test('loop finish with commit syncs version ledger items and keeps the local ver
 
   const release = await releaseWorkspace(project, { setVersion: '0.1.23' });
   assert.equal(release.ok, true);
+  {
+    const commitRelease = spawnSync('git', ['add', '.openprd/state/release-ledger.json'], { cwd: project, encoding: 'utf8' });
+    assert.equal(commitRelease.status, 0, commitRelease.stderr || commitRelease.stdout);
+    const saveRelease = spawnSync('git', ['commit', '-m', 'record release ledger'], { cwd: project, encoding: 'utf8' });
+    assert.equal(saveRelease.status, 0, saveRelease.stderr || saveRelease.stdout);
+  }
 
   await initLoopWorkspace(project, { agent: 'codex' });
   await planLoopWorkspace(project, { change: 'loop-release' });

@@ -178,6 +178,20 @@ function runCodexHook(project, eventName, payload) {
   return JSON.parse(result.stdout);
 }
 
+function runCodexHookWithoutCwd(project, eventName, payload, workingDirectory) {
+  const result = spawnSync(process.execPath, [path.join(project, '.codex', 'hooks', 'openprd-hook.mjs'), eventName], {
+    cwd: workingDirectory,
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      OPENPRD_CLI: path.resolve('openprd/bin/openprd.js'),
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
 async function makeCodexHookProject() {
   const project = await makeTempProject();
   const codexHome = path.join(project, 'codex-home');
@@ -193,6 +207,44 @@ async function makeCodexHookProject() {
   return { project, codexHome };
 }
 
+async function seedReadyFrontendDesignArtifacts(project) {
+  const activeDir = path.join(project, '.openprd', 'design', 'active');
+  await fs.writeFile(path.join(activeDir, 'facts-sheet.md'), '# Facts\n\n- 开放时间：10:00-17:00\n- 中文语音导览：7 GBP\n');
+  await fs.writeFile(path.join(activeDir, 'asset-spec.md'), '# Assets\n\n- 品牌资产：暂无官方素材，先用文字与中性色块表达\n');
+  await fs.writeFile(path.join(activeDir, 'image-preflight.md'), '# Image preflight\n\n- 真实图片：已准备一组可用参考图\n');
+  await fs.writeFile(path.join(activeDir, 'direction-plan.md'), '# Directions\n\n1. 导览叙事\n2. 编辑感故事\n3. 高密度工具\n');
+  await fs.writeFile(path.join(activeDir, 'selected-direction.md'), '# Selected\n\n- lens: editorial-contrast\n- theme: warm-editorial\n- layout: story-map\n');
+}
+
+async function seedDesignStarterEvent(project, output = 'index.html') {
+  await fs.appendFile(
+    path.join(project, '.openprd', 'state', 'events.jsonl'),
+    `${JSON.stringify({
+      type: 'design_starter_created',
+      at: '2026-06-09 09:00:00',
+      starterId: 'content-home',
+      output,
+    })}\n`,
+  );
+}
+
+async function writeCodexTranscript(project, sessionId, assistantText) {
+  const transcriptDir = path.join(project, '.openprd', 'test-transcripts');
+  await fs.mkdir(transcriptDir, { recursive: true });
+  const transcriptPath = path.join(transcriptDir, `${sessionId}.jsonl`);
+  await fs.writeFile(transcriptPath, `${JSON.stringify({
+    timestamp: '2026-06-09T01:00:00.000Z',
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      phase: 'commentary',
+      content: [{ type: 'output_text', text: assistantText }],
+    },
+  })}\n`);
+  return transcriptPath;
+}
+
 async function seedProjectKnowledgeSkill(project, skillName = 'billing-trace-rollback') {
   const skillDir = path.join(project, '.openprd', 'knowledge', 'skills', skillName);
   const skillPath = path.join(skillDir, 'SKILL.md');
@@ -200,19 +252,26 @@ async function seedProjectKnowledgeSkill(project, skillName = 'billing-trace-rol
   await fs.writeFile(skillPath, [
     '---',
     `name: ${skillName}`,
-    'description: 当处理 billing-api.js、traceId 透传或 webhook 回滚时，先复用这份项目级排查经验。',
+    'description: Use when the current task touches billing-api.js, traceId propagation, or webhook rollback and should reuse this verified project diagnosis path.',
+    'use_when: Use when the current task touches billing-api.js, traceId propagation, or webhook rollback and should reuse this verified project diagnosis path.',
     '---',
     '',
     `# ${skillName}`,
     '',
-    '## 触发场景',
+    '## 触发条件',
     '- 修改 `src/billing-api.js`',
     '- 处理 traceId 透传',
     '- 修 webhook 回滚',
     '',
+    '## 适用范围',
+    '- 适用于支付链路里 traceId 透传、回滚修复和 webhook 对账排查。',
+    '',
     '## 先看什么',
     '- `src/billing-api.js`',
     '- `docs/basic/backend-structure.md`',
+    '',
+    '## 不要直接套用',
+    '- 如果当前任务只是同仓库里的别的支付逻辑改动，不要因为文件名相似就套用。',
     '',
   ].join('\n'));
   await fs.writeFile(path.join(project, '.openprd', 'knowledge', 'index.json'), `${JSON.stringify({
@@ -314,7 +373,14 @@ describe('Codex requirement gate', () => {
     assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('Codex 原生 Image 2'));
     assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('imagegen'));
     assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('独立素材输出（standalone asset）'));
+    assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('候选效果图'));
+    assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('是否符合预期'));
+    assert.ok(imageGenerationPayload.hookSpecificOutput.additionalContext.includes('后续效果图/实现截图对比'));
     assert.equal(await pathExists(path.join(project, '.openprd', 'harness', 'requirement-gate.json')), false);
+    const imageStopReminder = runCodexHook(project, 'Stop', {});
+    assert.equal(imageStopReminder.continue, true);
+    assert.ok(imageStopReminder.hookSpecificOutput.additionalContext.includes('候选效果图'));
+    assert.ok(imageStopReminder.hookSpecificOutput.additionalContext.includes('是否按此继续后续实现'));
 
     const largeUiDirectionPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: '这个设置页面界面改动比较大，先用 Computer Use 截产品内页面，再给我三种设计方向效果图确认。',
@@ -325,6 +391,15 @@ describe('Codex requirement gate', () => {
     assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('Codex 原生 Image 2'));
     assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('1/2/3'));
     assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('.openprd/harness/visual-reviews/'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('候选效果图'));
+    assert.ok(largeUiDirectionPayload.hookSpecificOutput.additionalContext.includes('多对象参考处理'));
+
+    const visualMismatchPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '这个实现跟效果图不一致，看着有点好丑，你按效果图继续复刻一下。',
+    });
+    assert.equal(visualMismatchPayload.continue, true);
+    assert.ok(visualMismatchPayload.hookSpecificOutput.additionalContext.includes('至少先产出一份'));
+    assert.ok(visualMismatchPayload.hookSpecificOutput.additionalContext.includes('focus-board'));
 
     const readOnlyProductPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: '帮我看看这个 Agent 编排实现逻辑是不是漏了 Windows 用户场景，先分析一下。',
@@ -424,6 +499,7 @@ describe('Codex requirement gate', () => {
     });
     assert.equal(blockedSynthesizePayload.decision, 'block');
     assert.ok(blockedSynthesizePayload.reason.includes('需求判断 / 需求理解 / 功能范围 / 技术方案'));
+    assert.ok(blockedSynthesizePayload.reason.includes('第一批最容易触达的社区或种子用户'));
 
     const clarificationConfirmPayload = runCodexHook(project, 'UserPromptSubmit', {
       prompt: '确认',
@@ -440,6 +516,7 @@ describe('Codex requirement gate', () => {
     });
     assert.equal(allowedCapturePayload.decision, undefined);
     assert.equal(allowedCapturePayload.continue, true);
+    await captureFreshRequirementState(project, '用户已经确认 Agent 团队模板导入流的核心范围。');
 
     const allowedSynthesizePayload = runCodexHook(project, 'PreToolUse', {
       tool_name: 'Bash',
@@ -591,7 +668,8 @@ describe('Codex requirement gate', () => {
       prompt: '请继续处理 src/billing-api.js 里的 traceId 透传和 webhook 回滚，直接修。',
     });
     const context = payload.hookSpecificOutput.additionalContext;
-    assert.ok(context.includes('项目级 Skill: 自动命中 1 个'));
+    assert.ok(context.includes('项目级经验候选: 找到 1 条'));
+    assert.ok(context.includes('先做项目经验检查'));
     assert.ok(context.includes('billing-trace-rollback'));
     assert.ok(context.includes('traceId 透传'));
 
@@ -653,6 +731,11 @@ describe('Codex requirement gate', () => {
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('现有功能优化=L1'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('新功能/新流程方案=L2'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('需求判断 / 需求理解 / 功能范围 / 技术方案'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('第一批最容易触达的社区或种子用户'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('当前替代方案'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('先怎么手工交付'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('什么承诺才算真需求'));
+    assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('验证阶段怎样先活下来'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('轻量主句'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('固定模板'));
     assert.ok(requirementPromptPayload.hookSpecificOutput.additionalContext.includes('Markdown tables'));
@@ -803,6 +886,73 @@ describe('Codex requirement gate', () => {
 
   });
 
+  test('run context can reuse the current turn prompt for lightweight frontend implementation guidance', async () => {
+    const { project } = await makeCodexHookProject();
+
+    const hookPayload = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '请直接实现一个静态单页原型：大英博物馆中文导览 App 首页，包含今日推荐、楼层浏览、路线规划、门票与到访准备。不需要先来回确认，直接完成。',
+    });
+    assert.equal(hookPayload.continue, true);
+
+    const result = spawnSync(process.execPath, [
+      path.resolve('bin/openprd.js'),
+      'run',
+      project,
+      '--context',
+    ], {
+      cwd: path.resolve('.'),
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /建议下一步: (按轻量原型路径继续实现|先给 mini-plan 再继续实现)/);
+    assert.match(result.stdout, /当前回复目标: 先用 3-5 行 mini-plan 收一下目标、范围内、范围外和验证方式/);
+    assert.match(result.stdout, /\.openprd\/design\/active\//);
+    assert.match(result.stdout, /\.openprd\/design\/templates\//);
+    assert.match(result.stdout, /openprd design-starter/);
+    assert.match(result.stdout, /openprd run \. --context --message <用户原话>/);
+    assert.match(result.stdout, /--brief/);
+    assert.match(result.stdout, /--sections/);
+    assert.match(result.stdout, /只有确认这个页面本来就不依赖外部事实、品牌素材或真实图片时，才在 active design artifacts 写清无依赖/);
+    assert.match(result.stdout, /先不要急着加 `--no-real-images`/);
+    assert.match(result.stdout, /先把它当主参考源/);
+    assert.match(result.stdout, /Patch Mode/);
+    assert.match(result.stdout, /下一步必须出现真实写文件动作/);
+    assert.match(result.stdout, /index\.next\.html/);
+    assert.match(result.stdout, /不要删除 `index.html` 后重起/);
+    assert.match(result.stdout, /主要占位已清掉/);
+    assert.doesNotMatch(result.stdout, /建议下一步: (继续本轮需求入口澄清|clarify-user)/);
+  });
+
+  test('run context routes explicit 梳理诉求 into brainstorm mode instead of stopping at clarify summary', async () => {
+    const { project } = await makeCodexHookProject();
+
+    const context = await runWorkspace(project, {
+      context: true,
+      message: '我想做一个给销售和产品团队用的 AI 客户访谈助手，你先帮我梳理下第一版该怎么切、值不值得先做太重。',
+    });
+
+    assert.equal(context.recommendation.type, 'workflow');
+    assert.equal(context.recommendation.nextAction, 'brainstorm');
+    assert.equal(context.recommendation.title, '先进入脑暴模式收敛方向');
+    assert.equal(context.recommendation.command, 'openprd brainstorm . --open');
+
+    const printResult = spawnSync(process.execPath, [
+      path.resolve('bin/openprd.js'),
+      'run',
+      project,
+      '--context',
+      '--message',
+      '我想做一个给销售和产品团队用的 AI 客户访谈助手，你先帮我梳理下第一版该怎么切、值不值得先做太重。',
+    ], {
+      cwd: path.resolve('.'),
+      encoding: 'utf8',
+    });
+    assert.equal(printResult.status, 0, printResult.stderr);
+    assert.match(printResult.stdout, /建议下一步: 先进入脑暴模式收敛方向/);
+    assert.match(printResult.stdout, /内部下一步参考: openprd brainstorm \. --open/);
+    assert.match(printResult.stdout, /当前回复目标: 先进入脑暴模式，把核心诉求、目标结果、当前替代方案、推荐方向和验证重点整理成脑暴页；不要只停在 requirement 摘要。/);
+  });
+
 test('Codex hook accepts a later same-session execution instruction once review and tasks are ready', async () => {
   const { project } = await makeCodexHookProject();
 
@@ -858,7 +1008,7 @@ test('Codex hook treats review-page continue copy as review authorization plus s
   const { project } = await makeCodexHookProject();
 
   const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
-    prompt: '在【Agent管理】模块下，我希望增加一个【团队搭建】放到【Agent 工区】菜单下面，这个模块主要是将 Agent市场、技能库和 CLI库按流程串联起来，一站式完成配置。',
+    prompt: '在【Agent管理】模块下新增一个【团队搭建】流程，放到【Agent 工区】菜单下面，让操作员可以一站式完成配置。',
   });
   assert.equal(requirementPromptPayload.continue, true);
 
@@ -917,6 +1067,93 @@ test('Codex hook treats review-page continue copy as review authorization plus s
   const runContext = await runWorkspace(project, { context: true });
   assert.equal(runContext.recommendation.type, 'requirement-intake');
   assert.ok(runContext.recommendation.reason.includes('本次调整'));
+});
+
+test('Codex hook auto-authorizes execution after review-continue copy once change and tasks are ready', async () => {
+  const { project } = await makeCodexHookProject();
+
+  const requirementPromptPayload = runCodexHook(project, 'UserPromptSubmit', {
+    prompt: '在【Agent管理】模块下，我希望增加一个【团队搭建】放到【Agent 工区】菜单下面，这个模块主要是将 Agent市场、技能库和 CLI库按流程串联起来，一站式完成配置。',
+  });
+  assert.equal(requirementPromptPayload.continue, true);
+
+  await captureFreshRequirementState(project, '用户已经确认 Team Builder 的需求范围。');
+  const synthesizedTeamBuilder = await synthesizeWorkspace(project, {
+    title: 'Team Builder',
+    owner: 'PM',
+    problemStatement: 'Agents need a guided team setup flow',
+    whyNow: 'Configuration spans several libraries',
+    primaryUsers: ['Agent operators'],
+    goals: ['Guide team setup'],
+    successMetrics: ['Setup succeeds'],
+    acceptanceGoals: ['Operators can complete team setup'],
+    inScope: ['Agent workspace team setup'],
+    outOfScope: ['Billing'],
+    primaryFlows: ['Operator configures a team'],
+    functional: ['Create the team setup flow'],
+    productType: 'agent',
+  });
+
+  const reviewCommand = `openprd review . --mark confirmed --version ${synthesizedTeamBuilder.snapshot.versionId} --digest ${synthesizedTeamBuilder.snapshot.digest} --work-unit ${synthesizedTeamBuilder.workUnitId}`;
+  const reviewCopyPrompt = [
+    'OpenPrD Review: 认可并继续下一步',
+    '这版需求确认稿已经通过。请先记录这次确认结果，并继续推进后续落地内容。只有后面确实需要额外授权时，再用人话说明影响和下一步。',
+    '命令:',
+    reviewCommand,
+    '上下文:',
+    JSON.stringify(buildReviewExportPayload(synthesizedTeamBuilder.snapshot), null, 2),
+  ].join('\n\n');
+
+  const reviewContinuePayload = runCodexHook(project, 'UserPromptSubmit', {
+    prompt: reviewCopyPrompt,
+  });
+  assert.equal(reviewContinuePayload.continue, true);
+
+  const authorizedReviewConfirmPayload = runCodexHook(project, 'PreToolUse', {
+    tool_name: 'Bash',
+    tool_input: { cmd: reviewCommand },
+  });
+  assert.equal(authorizedReviewConfirmPayload.decision, undefined);
+  assert.equal(authorizedReviewConfirmPayload.continue, true);
+
+  await reviewWorkspace(project, {
+    mark: 'confirmed',
+    version: synthesizedTeamBuilder.snapshot.versionId,
+    digest: synthesizedTeamBuilder.snapshot.digest,
+    workUnit: synthesizedTeamBuilder.workUnitId,
+  });
+  await generateOpenSpecChangeWorkspace(project, { change: 'team-builder-review-continue' });
+  const requirementGateBeforePatch = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
+  await fs.mkdir(path.join(project, '.openprd', 'harness', 'session-bindings'), { recursive: true });
+  await fs.writeFile(path.join(project, '.openprd', 'harness', 'session-bindings', `${requirementGateBeforePatch.sessionId}.json`), JSON.stringify({
+    version: 1,
+    sessionId: requirementGateBeforePatch.sessionId,
+    promptPreview: requirementGateBeforePatch.promptPreview,
+    gateStatus: requirementGateBeforePatch.status,
+    gateActive: requirementGateBeforePatch.active,
+    title: synthesizedTeamBuilder.snapshot.title,
+    versionId: synthesizedTeamBuilder.snapshot.versionId,
+    digest: synthesizedTeamBuilder.snapshot.digest,
+    workUnitId: synthesizedTeamBuilder.workUnitId,
+    reviewStatus: 'confirmed',
+    changeId: 'team-builder-review-continue',
+  }, null, 2));
+  await fs.writeFile(path.join(project, '.openprd', 'harness', 'research-gate.json'), JSON.stringify({
+    version: 1,
+    active: false,
+    status: 'resolved-for-test',
+  }, null, 2));
+
+  const allowedPatchPayload = runCodexHook(project, 'PreToolUse', {
+    tool_name: 'apply_patch',
+    tool_input: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n+// review continue copy auto-authorized execution\n*** End Patch',
+  });
+  assert.equal(allowedPatchPayload.decision, undefined);
+  assert.equal(allowedPatchPayload.continue, true);
+
+  const requirementGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), 'utf8'));
+  assert.equal(requirementGate.active, false);
+  assert.equal(requirementGate.status, 'execution-authorized');
 });
 
 test('Codex hook supports silent-record review lanes when the user opts out of extra review confirmation', async () => {
@@ -1296,6 +1533,8 @@ test('Codex hook supports silent-record review lanes when the user opts out of e
     assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('我先用产品和业务语言复述一下')));
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('需求判断：')));
+    assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('第一批最容易触达')));
+    assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('什么承诺才算真需求')));
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('主要服务对象')));
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('| 功能模块 |')));
     assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('| 技术部分 |')));
@@ -1503,6 +1742,369 @@ test('Codex hook supports silent-record review lanes when the user opts out of e
     researchGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'research-gate.json'), 'utf8'));
     assert.equal(researchGate.active, false);
     assert.equal(researchGate.status, 'evidence-collected');
+  });
+
+  test('Codex hook blocks frontend implementation writes until active design contracts are filled', async () => {
+    const { project } = await makeCodexHookProject();
+
+    const frontendPrompt = runCodexHook(project, 'UserPromptSubmit', {
+      prompt: '请直接实现一个大英博物馆中文导览 App 首页静态原型，包含今日推荐、楼层浏览、路线规划、门票和到访准备。已知事实：开放时间 10:00-17:00，中文语音导览 7 GBP，会员优先。不要做成通用极简 SaaS 风。',
+    });
+    assert.equal(frontendPrompt.continue, true);
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-08 00:00:00',
+    }, null, 2));
+
+    const blockedPatchPayload = runCodexHook(project, 'PreToolUse', {
+      tool_name: 'apply_patch',
+      tool_input: [
+        '*** Begin Patch',
+        '*** Add File: index.html',
+        '+<!doctype html>',
+        '+<html lang="zh-CN">',
+        '+<body>museum prototype</body>',
+        '+</html>',
+        '*** End Patch',
+      ].join('\n'),
+    });
+    assert.equal(blockedPatchPayload.decision, 'block');
+    assert.ok(blockedPatchPayload.reason.includes('design-preflight contract is still incomplete'));
+    assert.ok(blockedPatchPayload.reason.includes('facts-sheet.md'));
+    assert.ok(blockedPatchPayload.reason.includes('asset-spec.md'));
+    assert.ok(blockedPatchPayload.reason.includes('image-preflight.md'));
+    assert.ok(blockedPatchPayload.reason.includes('direction-plan.md'));
+    assert.ok(blockedPatchPayload.reason.includes('selected-direction.md'));
+
+    const activeDir = path.join(project, '.openprd', 'design', 'active');
+    await fs.writeFile(path.join(activeDir, 'facts-sheet.md'), '# Facts\n\n- 开放时间：10:00-17:00\n- 中文语音导览：7 GBP\n- 会员优先：已知用户输入\n');
+    await fs.writeFile(path.join(activeDir, 'asset-spec.md'), '# Assets\n\n- 品牌资产：暂无官方素材，先用文字与中性色块表达\n');
+    await fs.writeFile(path.join(activeDir, 'image-preflight.md'), '# Image preflight\n\n- 真实馆藏图片：当前缺失\n- 降级方案：先用明确的馆藏卡片占位并标记待替换\n');
+    await fs.writeFile(path.join(activeDir, 'direction-plan.md'), '# Directions\n\n1. 馆藏导览\n2. 编辑感叙事\n3. 高密度工具型\n');
+    await fs.writeFile(path.join(activeDir, 'selected-direction.md'), '# Selected\n\n- lens: catalog-clarity\n- theme: warm-editorial\n- layout: story-map\n');
+
+    const allowedPatchPayload = runCodexHook(project, 'PreToolUse', {
+      tool_name: 'apply_patch',
+      tool_input: [
+        '*** Begin Patch',
+        '*** Add File: index.html',
+        '+<!doctype html>',
+        '+<html lang="zh-CN">',
+        '+<body>museum prototype</body>',
+        '+</html>',
+        '*** End Patch',
+      ].join('\n'),
+    });
+    assert.equal(allowedPatchPayload.decision, undefined);
+    assert.equal(allowedPatchPayload.continue, true);
+  });
+
+  test('Codex hook blocks Patch Mode hover after overwrite is announced and releases after target write lands', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0001';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await seedReadyFrontendDesignArtifacts(project);
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+    const transcriptPath = await writeCodexTranscript(
+      project,
+      sessionId,
+      '我现在开始覆盖入口文件，下一步直接重写 index.html，把真实内容和图片约束落进去。'
+    );
+
+    const blockedRead = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      tool_name: 'Read',
+      tool_input: {
+        file_path: path.join(project, 'docs', 'basic', 'frontend-guidelines.md'),
+      },
+    });
+    assert.equal(blockedRead.decision, 'block');
+    assert.ok(blockedRead.reason.includes('entry-overwrite stage'));
+    assert.ok(blockedRead.reason.includes('index.html'));
+    assert.ok(blockedRead.reason.includes('index.next.html'));
+
+    const allowedWrite = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      tool_name: 'apply_patch',
+      tool_input: [
+        '*** Begin Patch',
+        '*** Add File: index.next.html',
+        '+<!doctype html>',
+        '+<html lang="zh-CN"><body>rewrite draft</body></html>',
+        '*** End Patch',
+      ].join('\n'),
+    });
+    assert.equal(allowedWrite.decision, undefined);
+    assert.equal(allowedWrite.continue, true);
+
+    const armedGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(armedGate.active, true);
+    assert.equal(armedGate.status, 'write-attempted');
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await fs.writeFile(path.join(project, 'index.next.html'), '<!doctype html><html lang="zh-CN"><body>rewrite draft</body></html>\n');
+
+    const releasedRead = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      tool_name: 'Read',
+      tool_input: {
+        file_path: path.join(project, 'index.html'),
+      },
+    });
+    assert.equal(releasedRead.decision, undefined);
+    assert.equal(releasedRead.continue, true);
+
+    const closedGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(closedGate.active, false);
+    assert.equal(closedGate.status, 'write-observed');
+  });
+
+  test('Codex hook only allows one immediate post-starter focus pass before requiring an entry write', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0003';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await seedReadyFrontendDesignArtifacts(project);
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+
+    const firstFocus = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_name: 'Read',
+      tool_input: {
+        file_path: path.join(project, 'index.html'),
+      },
+    });
+    assert.equal(firstFocus.decision, undefined);
+    assert.equal(firstFocus.continue, true);
+
+    const secondFocus = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_name: 'Bash',
+      tool_input: {
+        command: "sed -n '1,80p' .openprd/design/active/facts-sheet.md",
+      },
+    });
+    assert.equal(secondFocus.decision, undefined);
+    assert.equal(secondFocus.continue, true);
+
+    const gateAfterFocus = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(gateAfterFocus.active, true);
+    assert.equal(gateAfterFocus.phase, 'handoff');
+    assert.equal(gateAfterFocus.status, 'handoff-awaiting-entry-write');
+    assert.equal(gateAfterFocus.focusAllowanceRemaining, 0);
+
+    const blockedSearch = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_name: 'WebSearch',
+      tool_input: {
+        query: '西双版纳 观鸟 官方',
+      },
+    });
+    assert.equal(blockedSearch.decision, 'block');
+    assert.ok(blockedSearch.reason.includes('post-starter hover'));
+    assert.ok(blockedSearch.reason.includes('docs/basic'));
+    assert.ok(blockedSearch.reason.includes('index.next.html'));
+
+    const allowedWrite = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_name: 'apply_patch',
+      tool_input: [
+        '*** Begin Patch',
+        '*** Update File: index.html',
+        '@@',
+        '-<!doctype html><html lang="zh-CN"><body>starter</body></html>',
+        '+<!doctype html><html lang="zh-CN"><body>rainforest guide</body></html>',
+        '*** End Patch',
+      ].join('\n'),
+    });
+    assert.equal(allowedWrite.decision, undefined);
+    assert.equal(allowedWrite.continue, true);
+
+    const armedGate = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(armedGate.active, true);
+    assert.equal(armedGate.status, 'write-attempted');
+  });
+
+  test('Codex hook treats nested tool_input.command shell reads as allowed handoff focus', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0005';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await seedReadyFrontendDesignArtifacts(project);
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+
+    const focusRead = runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_input: {
+        command: "sed -n '1,120p' index.html",
+      },
+    });
+    assert.equal(focusRead.decision, undefined);
+    assert.equal(focusRead.continue, true);
+
+    const gateAfterFocus = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(gateAfterFocus.active, true);
+    assert.equal(gateAfterFocus.phase, 'handoff');
+    assert.equal(gateAfterFocus.status, 'handoff-focus-read');
+    assert.equal(gateAfterFocus.focusAllowanceRemaining, 1);
+  });
+
+  test('Codex hook can still arm Patch Mode from the hook script path when PreToolUse payload omits cwd', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0006';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await seedReadyFrontendDesignArtifacts(project);
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+
+    const focusRead = runCodexHookWithoutCwd(project, 'PreToolUse', {
+      tool_input: {
+        command: "sed -n '1,120p' index.html",
+      },
+    }, path.resolve('..'));
+    assert.equal(focusRead.decision, undefined);
+    assert.equal(focusRead.continue, true);
+
+    const gateAfterFocus = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), 'utf8'));
+    assert.equal(gateAfterFocus.active, true);
+    assert.equal(gateAfterFocus.phase, 'handoff');
+    assert.equal(gateAfterFocus.status, 'handoff-focus-read');
+    assert.equal(gateAfterFocus.focusAllowanceRemaining, 1);
+  });
+
+  test('Stop hook reminds when Patch Mode overwrite was announced but no entry write landed', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0002';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+    const transcriptPath = await writeCodexTranscript(
+      project,
+      sessionId,
+      '我现在开始覆盖入口文件，下一步直接重写 index.html，把真实内容落进去。'
+    );
+
+    runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      tool_name: 'Read',
+      tool_input: {
+        file_path: path.join(project, 'docs', 'basic', 'frontend-guidelines.md'),
+      },
+    });
+
+    const stop = runCodexHook(project, 'Stop', {
+      session_id: sessionId,
+    });
+    assert.equal(stop.continue, true);
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('入口文件还没真正落盘'));
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('index.html'));
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('index.next.html'));
+  });
+
+  test('Stop hook reminds when design-starter landed but Patch Mode handoff never wrote the entry', async () => {
+    const { project } = await makeCodexHookProject();
+    const sessionId = '019ea999-0000-7000-8000-patchmode0004';
+
+    runCodexHook(project, 'UserPromptSubmit', {
+      session_id: sessionId,
+      prompt: '请直接实现一个西双版纳雨林观鸟导览首页，不要停下来问问题。',
+    });
+
+    await fs.writeFile(path.join(project, '.openprd', 'harness', 'requirement-gate.json'), JSON.stringify({
+      version: 1,
+      active: false,
+      status: 'not-required',
+      reason: 'test override',
+      updatedAt: '2026-06-09 00:00:00',
+    }, null, 2));
+    await seedReadyFrontendDesignArtifacts(project);
+    await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html lang="zh-CN"><body>starter</body></html>\n');
+    await seedDesignStarterEvent(project, 'index.html');
+
+    runCodexHook(project, 'PreToolUse', {
+      session_id: sessionId,
+      tool_name: 'Read',
+      tool_input: {
+        file_path: path.join(project, 'index.html'),
+      },
+    });
+
+    const stop = runCodexHook(project, 'Stop', {
+      session_id: sessionId,
+    });
+    assert.equal(stop.continue, true);
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('design-starter 已经落地'));
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('Patch Mode handoff'));
+    assert.ok(stop.hookSpecificOutput.additionalContext.includes('index.html'));
   });
 
   test('Codex hook protects vault reads and reminds about browser, copy, and weapp rules', async () => {

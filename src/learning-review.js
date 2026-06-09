@@ -161,10 +161,10 @@ const STYLE_PROMPT_PACKS = {
         titlePatterns: [
           '《{topic}》修行札记',
           '《{topic}》证道小卷',
-          '《{topic}》归藏篇',
+          '《{topic}》藏录篇',
         ],
         outlineArc: ['筑基立卷', '观脉识图', '破雾辨源', '传功成谱', '归元再启'],
-        imageryBank: ['灵根', '经脉', '法门', '玉简', '破境', '归藏', '心法', '炉火'],
+        imageryBank: ['灵根', '经脉', '法门', '玉简', '破境', '藏录', '心法', '炉火'],
         sentenceRhythm: '长短句交错；每段先给意象，再落回事实、路径或证据。',
         taboo: [
           '不要把证据不存在的内容写成神迹或事实。',
@@ -179,7 +179,7 @@ const STYLE_PROMPT_PACKS = {
         titlePrompt: [
           '输入: topic、genre、substyle、agent-context、evidence summary。',
           '输出: 一个像书名的标题和一个短副题。',
-          '要求: 标题可带“札记/小卷/归藏/心法”等书籍意象，但必须保留 topic 的核心名词。',
+          '要求: 标题可带“札记/小卷/藏录/心法”等书籍意象，但必须保留 topic 的核心名词。',
         ].join('\n'),
         outlinePrompt: [
           '输入: 章节目标、证据类别、读者学习路径。',

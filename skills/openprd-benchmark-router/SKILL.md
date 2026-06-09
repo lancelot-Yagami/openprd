@@ -23,6 +23,7 @@ description: 为 OpenPrd 产品、CLI、Agent harness、AI code review / PR revi
 
 - 用户提到 OpenPrd、OpenSpec、Superpowers、Anthropic Skills、Lark CLI、Agent harness、AI code review、PR review、review lane、long-running agents、context engineering、prompt engineering、最佳实践、对标、参考、复刻或优化设计。
 - 用户提到图标、icon、图标站、图标库、图标资源、UI 图标、AI 图标、技术图标、3D 图标、功能图标、iconfont 或视觉资产参考。
+- 用户提到界面审美、设计框架、主题库、模板库、组件骨架、视觉资产库、前端体验风格或页面参考方法。
 - 用户要求解释某个 Codex / Claude / Cursor agent 为什么没有发现 skill，或希望提升 skill 自动识别、路由、生成、安装和持续执行能力。
 - 用户没有显式说 skill 名也要触发；不要要求用户记住 `$openprd-benchmark-router`。
 
@@ -48,6 +49,7 @@ description: 为 OpenPrd 产品、CLI、Agent harness、AI code review / PR revi
 - GitHub 仓库：需要理解架构、核心模块、关键流程或对标结论时，先用 DeepWiki。默认顺序是 `read_wiki_structure` 1 次，再 `ask_question` 1-2 次；只有在本地源码和已有结论仍不足时才追加。DeepWiki 不可用或覆盖不足时，再回退到 GitHub README、源码和官方文档。
 - 官方技术文档：涉及第三方库、框架、API、SDK、MCP、CLI 工具的用法、配置、限制、版本差异或迁移路径时，先检查本地代码、锁文件、README、类型定义；本地不足时再用 Context7，默认顺序是 `resolve_library_id` 1 次，再 `query_docs` 1-2 次。Context7 不足时说明缺口，再补官方文档、源码或其他一手资料。
 - 工程文章和产品文档：优先读取当前线上一手页面，只抽取和当前任务相关的观点与设计原则，不复制长文；如果内容可能过时，要说明时效风险。
+- 视觉与设计参考：优先吸收结构、节奏、信息组织、资产策略和质量门，不照搬品牌表层风格。需要官方品牌或产品事实时，优先官方站点、官方媒体包、官方设计系统和项目自身 approved benchmark。
 - 本地源码优先：当前工作区已经有相关源码时，常规修 bug、查实现、改功能优先读本地代码；DeepWiki 主要用于外部仓库架构理解和对标分析。
 - 停止调研：找到足以支持当前决策的 1-3 个高相关来源后停止扩展；候选来源重复时保留更权威、更新或更贴近当前任务的来源。
 - 追加调用前先写清“已确认什么、还缺什么”；不要为了同一问题只换个说法反复查询。
@@ -55,6 +57,7 @@ description: 为 OpenPrd 产品、CLI、Agent harness、AI code review / PR revi
 ## Source Map
 
 - OpenPrd / PRD 设计对标：`obra/superpowers`、`Fission-AI/OpenSpec`。
+- 创业验证 / 需求收口透镜：`slavingia/skills`。
 - CLI 与 skill 体系对标：`larksuite/cli`、`anthropics/skills`、Claude Skills 官方文档、Claude Code Skills 官方文档。
 - 长程 Agent 任务：Anthropic long-running agents harness 工程文章。
 - 通用 harness：OpenAI harness engineering、LangChain agent harness anatomy。
@@ -72,6 +75,7 @@ description: 为 OpenPrd 产品、CLI、Agent harness、AI code review / PR revi
 - 上下文工程：哪些信息常驻、哪些按需检索，是否使用稳定路径、链接和来源 ID 支持 just-in-time 检索，如何处理过期、冲突和可信度。
 - 提示词与 Skill 设计：触发描述是否具体但不过度强制，主说明是否短，细节是否按需放到 reference，是否明确不要硬套参考源。
 - 图标与视觉资产：先判断用途是 UI、AI 品牌、技术栈、3D 物件还是功能图标；优先选最贴近用途的资源站，再在实现阶段选择合适的代码图标库。
+- 前端设计框架：先判断要借的是主题锁定、布局骨架、组件清单、事实前置、素材前置、图片前置还是质量门；把可迁移原则落回 `.openprd/design/`、repo-local skill、hooks 或测试，不要停留在“参考了几个好看页面”。
 - CLI 与开发者体验：命令是否可发现、可组合、可预测；错误信息是否说明发生了什么、影响是什么、下一步怎么做；危险操作是否有确认。
 
 ## 设计输出

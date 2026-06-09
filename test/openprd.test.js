@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { buildChangeEntry, buildTaskCommitMessage, USER_CHANGE_SUMMARY_GUIDE } from '../src/change-summary.js';
 
 import {
@@ -22,6 +23,7 @@ import {
   clarifyWorkspace,
   classifyExternalReferenceWorkspace,
   classifyWorkspace,
+  designStarterWorkspace,
   diagramWorkspace,
   diffWorkspace,
   doctorWorkspace,
@@ -112,6 +114,330 @@ test('change summary formatter prefers user-visible verbs for commits and summar
   assert.deepEqual(USER_CHANGE_SUMMARY_GUIDE.preferredVerbs, ['新增', '修复', '优化', '调整', '移除']);
 });
 
+test('isolated Codex worker script bypasses noisy user Codex home and preserves outputs', async () => {
+  const project = await makeTempProject();
+  const noisyCodexHome = path.join(project, 'noisy-codex-home');
+  const legacyBin = path.join(project, 'legacy-bin');
+  const modernBin = path.join(project, 'modern-bin');
+  const legacyCodexPath = path.join(legacyBin, 'codex');
+  const modernCodexPath = path.join(modernBin, 'codex');
+  const promptFile = path.join(project, 'prompt.txt');
+  const outputJsonl = path.join(project, 'artifacts', 'worker-output.jsonl');
+  const outputLastMessage = path.join(project, 'artifacts', 'last-message.txt');
+  const fakeCodexLog = path.join(project, 'fake-codex-log.json');
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const isolatedWorkerScript = path.join(repoRoot, 'scripts', 'openprd-codex-isolated-worker.mjs');
+
+  await fs.mkdir(noisyCodexHome, { recursive: true });
+  await fs.writeFile(path.join(noisyCodexHome, 'auth.json'), JSON.stringify({ access_token: 'test-token' }, null, 2));
+  await fs.writeFile(path.join(noisyCodexHome, 'config.toml'), [
+    'model = "gpt-5.4"',
+    'service_tier = "default"',
+    '',
+  ].join('\n'));
+  await fs.mkdir(legacyBin, { recursive: true });
+  await fs.writeFile(legacyCodexPath, [
+    '#!/usr/bin/env node',
+    'const args = process.argv.slice(2);',
+    "if (args.includes('--help')) {",
+    "  process.stdout.write('Usage: codex exec [OPTIONS] [PROMPT]\\n');",
+    '  process.exit(0);',
+    '}',
+    "console.error('legacy codex should not be executed');",
+    'process.exit(97);',
+    '',
+  ].join('\n'));
+  await fs.chmod(legacyCodexPath, 0o755);
+  await fs.mkdir(modernBin, { recursive: true });
+  await fs.writeFile(modernCodexPath, [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    'const args = process.argv.slice(2);',
+    "if (args.includes('--help')) {",
+    "  process.stdout.write('Usage: codex exec [OPTIONS] [PROMPT]\\n      --dangerously-bypass-hook-trust\\n');",
+    '  process.exit(0);',
+    '}',
+    "const stdin = fs.readFileSync(0, 'utf8');",
+    'const payload = {',
+    '  args,',
+    '  stdin,',
+    '  cwd: process.cwd(),',
+    '  commandPath: process.argv[1],',
+    '  env: {',
+    '    CODEX_HOME: process.env.CODEX_HOME,',
+    '    OPENPRD_CODEX_HOME: process.env.OPENPRD_CODEX_HOME,',
+    '  },',
+    '};',
+    'fs.writeFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(payload, null, 2));',
+    'if (process.env.CODEX_HOME === process.env.FAKE_NOISY_CODEX_HOME) {',
+    "  console.error(\"Error loading config.toml: unknown variant 'default'\");",
+    '  process.exit(64);',
+    '}',
+    "const outputIndex = args.indexOf('-o');",
+    'if (outputIndex >= 0 && args[outputIndex + 1]) {',
+    '  fs.mkdirSync(path.dirname(args[outputIndex + 1]), { recursive: true });',
+    "  fs.writeFileSync(args[outputIndex + 1], 'final response\\n');",
+    '}',
+    "if (args.includes('--json')) {",
+    "  process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread_test' }) + '\\n');",
+    "  process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: 'final response' } }) + '\\n');",
+    '} else {',
+    "  process.stdout.write('final response\\n');",
+    '}',
+    '',
+  ].join('\n'));
+  await fs.chmod(modernCodexPath, 0o755);
+  await fs.writeFile(promptFile, 'reply with ok\n');
+
+  const result = spawnSync('node', [
+    isolatedWorkerScript,
+    '--cwd', project,
+    '--prompt-file', promptFile,
+    '--output-jsonl', outputJsonl,
+    '--output-last-message', outputLastMessage,
+    '--source-codex-home', noisyCodexHome,
+    '--full-auto',
+    '--skip-git-repo-check',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${legacyBin}:${modernBin}:${process.env.PATH}`,
+      FAKE_CODEX_LOG: fakeCodexLog,
+      FAKE_NOISY_CODEX_HOME: noisyCodexHome,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const log = JSON.parse(await fs.readFile(fakeCodexLog, 'utf8'));
+  assert.equal(log.commandPath, modernCodexPath);
+  assert.equal(log.env.CODEX_HOME === noisyCodexHome, false);
+  assert.equal(log.env.CODEX_HOME, log.env.OPENPRD_CODEX_HOME);
+  assert.ok(log.env.CODEX_HOME.includes('openprd-codex-home-'));
+  assert.equal(await pathExists(log.env.CODEX_HOME), false);
+  assert.equal(log.cwd, await fs.realpath(project));
+  assert.ok(log.args.includes('--json'));
+  assert.ok(log.args.includes('--skip-git-repo-check'));
+  assert.ok(log.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(log.args.includes('--dangerously-bypass-hook-trust'));
+  assert.ok(log.args.includes('--model'));
+  assert.ok(log.args.includes('gpt-5.4'));
+  assert.equal(log.stdin, 'reply with ok\n');
+  assert.ok((await fs.readFile(outputJsonl, 'utf8')).includes('"thread.started"'));
+  assert.equal((await fs.readFile(outputLastMessage, 'utf8')).trim(), 'final response');
+});
+
+test('isolated Codex worker script auto-resumes when starter output never gets overwritten', async () => {
+  const project = await makeTempProject();
+  const noisyCodexHome = path.join(project, 'noisy-codex-home');
+  const fakeBin = path.join(project, 'fake-bin');
+  const fakeCodexPath = path.join(fakeBin, 'codex');
+  const promptFile = path.join(project, 'prompt.txt');
+  const outputJsonl = path.join(project, 'artifacts', 'worker-output.jsonl');
+  const outputLastMessage = path.join(project, 'artifacts', 'last-message.txt');
+  const fakeCodexLog = path.join(project, 'fake-codex-log.jsonl');
+  const fakeCodexCounter = path.join(project, 'fake-codex-counter.txt');
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const isolatedWorkerScript = path.join(repoRoot, 'scripts', 'openprd-codex-isolated-worker.mjs');
+
+  await fs.mkdir(noisyCodexHome, { recursive: true });
+  await fs.writeFile(path.join(noisyCodexHome, 'auth.json'), JSON.stringify({ access_token: 'test-token' }, null, 2));
+  await fs.writeFile(path.join(noisyCodexHome, 'config.toml'), 'model = "gpt-5.4"\n');
+  await fs.mkdir(path.join(project, '.openprd', 'state'), { recursive: true });
+  await fs.writeFile(path.join(project, '.openprd', 'state', 'events.jsonl'), `${JSON.stringify({
+    type: 'design_starter_created',
+    at: '2026-06-09 10:02:37',
+    output: 'index.html',
+  })}\n`);
+  await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html><body>starter</body></html>\n');
+  await fs.mkdir(fakeBin, { recursive: true });
+  await fs.writeFile(fakeCodexPath, [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    'const args = process.argv.slice(2);',
+    "if (args.includes('--help')) {",
+    "  process.stdout.write('Usage: codex exec [OPTIONS] [PROMPT]\\n      --dangerously-bypass-hook-trust\\n');",
+    '  process.exit(0);',
+    '}',
+    "const stdin = fs.readFileSync(0, 'utf8');",
+    'const counterPath = process.env.FAKE_CODEX_COUNTER;',
+    'let count = 0;',
+    'try {',
+    "  count = Number(fs.readFileSync(counterPath, 'utf8').trim()) || 0;",
+    '} catch {}',
+    'count += 1;',
+    "fs.writeFileSync(counterPath, String(count));",
+    'const payload = {',
+    '  invocation: count,',
+    '  args,',
+    '  stdin,',
+    '  cwd: process.cwd(),',
+    '};',
+    "fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(payload) + '\\n');",
+    "const outputIndex = args.indexOf('-o');",
+    'if (outputIndex >= 0 && args[outputIndex + 1]) {',
+    '  fs.mkdirSync(path.dirname(args[outputIndex + 1]), { recursive: true });',
+    "  fs.writeFileSync(args[outputIndex + 1], count === 1 ? 'first pass\\n' : 'second pass\\n');",
+    '}',
+    'if (count === 2) {',
+    "  fs.writeFileSync(path.join(process.cwd(), 'index.html'), '<!doctype html><html><body>landed</body></html>\\n');",
+    '}',
+    "process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread_test' }) + '\\n');",
+    "process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: `item_${count}`, type: 'agent_message', text: count === 1 ? 'first pass' : 'second pass' } }) + '\\n');",
+    '',
+  ].join('\n'));
+  await fs.chmod(fakeCodexPath, 0o755);
+  await fs.writeFile(promptFile, 'reply with ok\n');
+
+  const result = spawnSync('node', [
+    isolatedWorkerScript,
+    '--cwd', project,
+    '--prompt-file', promptFile,
+    '--output-jsonl', outputJsonl,
+    '--output-last-message', outputLastMessage,
+    '--source-codex-home', noisyCodexHome,
+    '--full-auto',
+    '--skip-git-repo-check',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      FAKE_CODEX_LOG: fakeCodexLog,
+      FAKE_CODEX_COUNTER: fakeCodexCounter,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const invocations = await readJsonl(fakeCodexLog);
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations[0].args.slice(0, 2), ['exec', '--json']);
+  assert.deepEqual(invocations[1].args.slice(0, 3), ['exec', 'resume', 'thread_test']);
+  assert.ok(invocations[1].stdin.includes('不要继续搜集资料'));
+  assert.equal((await fs.readFile(path.join(project, 'index.html'), 'utf8')).includes('landed'), true);
+  const output = await fs.readFile(outputJsonl, 'utf8');
+  assert.ok(output.includes('thread_test'));
+  assert.equal((await fs.readFile(outputLastMessage, 'utf8')).trim(), 'second pass');
+});
+
+test('isolated Codex worker script auto-resumes when Patch Mode stalls after a write attempt', async () => {
+  const project = await makeTempProject();
+  const noisyCodexHome = path.join(project, 'noisy-codex-home');
+  const fakeBin = path.join(project, 'fake-bin');
+  const fakeCodexPath = path.join(fakeBin, 'codex');
+  const promptFile = path.join(project, 'prompt.txt');
+  const outputJsonl = path.join(project, 'artifacts', 'worker-output.jsonl');
+  const outputLastMessage = path.join(project, 'artifacts', 'last-message.txt');
+  const fakeCodexLog = path.join(project, 'fake-codex-log.jsonl');
+  const fakeCodexCounter = path.join(project, 'fake-codex-counter.txt');
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const isolatedWorkerScript = path.join(repoRoot, 'scripts', 'openprd-codex-isolated-worker.mjs');
+
+  await fs.mkdir(noisyCodexHome, { recursive: true });
+  await fs.writeFile(path.join(noisyCodexHome, 'auth.json'), JSON.stringify({ access_token: 'test-token' }, null, 2));
+  await fs.writeFile(path.join(noisyCodexHome, 'config.toml'), 'model = "gpt-5.4"\n');
+  await fs.mkdir(path.join(project, '.openprd', 'state'), { recursive: true });
+  await fs.mkdir(path.join(project, '.openprd', 'harness'), { recursive: true });
+  await fs.writeFile(path.join(project, '.openprd', 'state', 'events.jsonl'), `${JSON.stringify({
+    type: 'design_starter_created',
+    at: '2026-06-09 10:02:37',
+    output: 'index.html',
+  })}\n`);
+  await fs.writeFile(path.join(project, 'index.html'), '<!doctype html><html><body>starter</body></html>\n');
+  const nowMs = Date.now();
+  await fs.writeFile(path.join(project, '.openprd', 'harness', 'patch-mode-gate.json'), JSON.stringify({
+    version: 1,
+    active: true,
+    status: 'write-attempted',
+    phase: 'strict',
+    targetFile: 'index.html',
+    targetHashAtArm: '8666f166dbf8513f',
+    fileHashesAtArm: {
+      'index.html': '8666f166dbf8513f',
+    },
+    draftFiles: [],
+    armedAtMs: nowMs,
+    lastWriteAttemptAtMs: nowMs,
+  }, null, 2));
+  await fs.mkdir(fakeBin, { recursive: true });
+  await fs.writeFile(fakeCodexPath, [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    'const args = process.argv.slice(2);',
+    "if (args.includes('--help')) {",
+    "  process.stdout.write('Usage: codex exec [OPTIONS] [PROMPT]\\n      --dangerously-bypass-hook-trust\\n');",
+    '  process.exit(0);',
+    '}',
+    'const counterPath = process.env.FAKE_CODEX_COUNTER;',
+    'let count = 0;',
+    'try {',
+    "  count = Number(fs.readFileSync(counterPath, 'utf8').trim()) || 0;",
+    '} catch {}',
+    'count += 1;',
+    "fs.writeFileSync(counterPath, String(count));",
+    "const stdin = fs.readFileSync(0, 'utf8');",
+    'const payload = {',
+    '  invocation: count,',
+    '  args,',
+    '  stdin,',
+    '  cwd: process.cwd(),',
+    '};',
+    "fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(payload) + '\\n');",
+    "const outputIndex = args.indexOf('-o');",
+    'if (outputIndex >= 0 && args[outputIndex + 1]) {',
+    '  fs.mkdirSync(path.dirname(args[outputIndex + 1]), { recursive: true });',
+    "  fs.writeFileSync(args[outputIndex + 1], count === 1 ? 'stalled pass\\n' : 'resumed pass\\n');",
+    '}',
+    "process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread_test' }) + '\\n');",
+    "process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: `item_${count}`, type: 'agent_message', text: count === 1 ? 'stalled pass' : 'resumed pass' } }) + '\\n');",
+    'if (count === 1) {',
+    '  setInterval(() => {}, 1000);',
+    '} else {',
+    "  fs.writeFileSync(path.join(process.cwd(), 'index.html'), '<!doctype html><html><body>landed after stall</body></html>\\n');",
+    '}',
+    '',
+  ].join('\n'));
+  await fs.chmod(fakeCodexPath, 0o755);
+  await fs.writeFile(promptFile, 'reply with ok\n');
+
+  const result = spawnSync('node', [
+    isolatedWorkerScript,
+    '--cwd', project,
+    '--prompt-file', promptFile,
+    '--output-jsonl', outputJsonl,
+    '--output-last-message', outputLastMessage,
+    '--source-codex-home', noisyCodexHome,
+    '--full-auto',
+    '--skip-git-repo-check',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      FAKE_CODEX_LOG: fakeCodexLog,
+      FAKE_CODEX_COUNTER: fakeCodexCounter,
+      OPENPRD_PATCH_MODE_MONITOR_INTERVAL_MS: '25',
+      OPENPRD_PATCH_MODE_ENTRY_STALL_MS: '400',
+      OPENPRD_PATCH_MODE_WRITE_ATTEMPT_STALL_MS: '150',
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const invocations = await readJsonl(fakeCodexLog);
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations[1].args.slice(0, 3), ['exec', 'resume', 'thread_test']);
+  assert.ok(invocations[1].stdin.includes('不要再 web search'));
+  assert.ok(invocations[1].stdin.includes('不要 delete-first'));
+  assert.equal((await fs.readFile(path.join(project, 'index.html'), 'utf8')).includes('landed after stall'), true);
+  assert.equal((await fs.readFile(outputLastMessage, 'utf8')).trim(), 'resumed pass');
+});
+
 test('release workspace tracks current project version and version items', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });
@@ -183,6 +509,14 @@ test('init creates a workspace and validate passes', async () => {
   assert.ok(await fs.stat(path.join(project, '.openprd', 'knowledge', 'index.json')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.openprd', 'benchmarks', 'sources.yaml')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.openprd', 'benchmarks', 'index.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'README.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'themes', 'theme-catalog.json')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'layouts', 'layout-catalog.json')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'templates', 'README.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'templates', 'content-home.html')).then(() => true));
+  assert.ok((await fs.readFile(path.join(project, '.openprd', 'design', 'templates', 'README.md'), 'utf8')).includes('推荐起步组合'));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'active', 'facts-sheet.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.openprd', 'design', 'active', 'selected-direction.md')).then(() => true));
   assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'benchmarks', 'inbox')), []);
   assert.equal(await pathExists(path.join(project, '.openprd', 'learning', 'current.json')), false);
   assert.equal(await pathExists(path.join(project, '.openprd', 'learning', 'index.json')), false);
@@ -190,7 +524,9 @@ test('init creates a workspace and validate passes', async () => {
   assert.deepEqual(await fs.readdir(path.join(project, '.openprd', 'quality', 'reports')), []);
   assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'clarify.html')), false);
   assert.equal(await pathExists(path.join(project, '.openprd', 'engagements', 'active', 'review.html')), false);
-  assert.equal(hasTomlFeatureKey(await fs.readFile(path.join(project, '.codex', 'config.toml'), 'utf8'), 'codex_hooks'), true);
+  const codexConfig = await fs.readFile(path.join(project, '.codex', 'config.toml'), 'utf8');
+  assert.equal(hasTomlFeatureKey(codexConfig, 'hooks'), true);
+  assert.equal(hasTomlFeatureKey(codexConfig, 'codex_hooks'), false);
   const hooksJson = JSON.parse(await fs.readFile(path.join(project, '.codex', 'hooks.json'), 'utf8'));
   assert.equal(hooksJson.UserPromptSubmit.some((group) => group.hooks?.some((hook) => hook.command.includes('openprd-hook.mjs'))), true);
   assert.equal(findOpenPrdHookGroup(hooksJson.PreToolUse)?.matcher, OPENPRD_LITE_WRITE_TOOL_MATCHER);
@@ -214,7 +550,19 @@ test('init creates a workspace and validate passes', async () => {
   assert.ok(requirementIntakeSkill.includes('agent'));
   assert.ok(await fs.stat(path.join(project, '.codex', 'skills', 'openprd-requirement-intake', 'references', 'routing-rubric.md')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.codex', 'skills', 'openprd-requirement-intake', 'references', 'prd-template-lenses.md')).then(() => true));
+  const frontendDesignSkill = await fs.readFile(path.join(project, '.codex', 'skills', 'openprd-frontend-design', 'SKILL.md'), 'utf8');
+  assert.equal(frontendDesignSkill.startsWith('---\n'), true);
+  assert.ok(frontendDesignSkill.includes('.openprd/design/'));
+  assert.ok(frontendDesignSkill.includes('Three Directions Must Be Heterogeneous'));
+  assert.ok(frontendDesignSkill.includes('.openprd/design/templates/README.md'));
+  assert.ok(frontendDesignSkill.includes('模板默认组合优先于'));
+  assert.ok(await fs.stat(path.join(project, '.codex', 'skills', 'openprd-frontend-design', 'references', 'design-asset-contract.md')).then(() => true));
+  assert.ok(await fs.stat(path.join(project, '.codex', 'skills', 'openprd-frontend-design', 'references', 'direction-engine.md')).then(() => true));
   assert.equal((await fs.readFile(path.join(project, '.codex', 'skills', 'openprd-benchmark-router', 'SKILL.md'), 'utf8')).startsWith('---\n'), true);
+  const workspaceConfig = await fs.readFile(path.join(project, '.openprd', 'config.yaml'), 'utf8');
+  assert.ok(workspaceConfig.includes('design:'));
+  assert.ok(workspaceConfig.includes('frameworkRoot: .openprd/design'));
+  assert.ok(workspaceConfig.includes('templateRoot: .openprd/design/templates'));
   assert.equal((await fs.readFile(path.join(project, '.cursor', 'rules', 'openprd.mdc'), 'utf8')).startsWith('---\n'), true);
   assert.ok(await fs.stat(path.join(project, '.codex', 'prompts', 'openprd-verify.md')).then(() => true));
   assert.ok(await fs.stat(path.join(project, '.codex', 'prompts', 'openprd-run.md')).then(() => true));
@@ -249,6 +597,248 @@ test('init creates a workspace and validate passes', async () => {
   assert.ok(logs.some((line) => line.includes('OpenPrd standards: 通过')));
 });
 
+test('design starter turns a bundled template into a real page entry', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+
+  const starter = await designStarterWorkspace(project, {
+    starter: 'content-home',
+    out: 'index.html',
+  });
+  assert.equal(starter.ok, true);
+  assert.equal(starter.starterId, 'content-home');
+  assert.equal(starter.relativeOutputPath, 'index.html');
+  assert.deepEqual(starter.defaults, {
+    lens: 'editorial-contrast',
+    theme: 'warm-editorial',
+    layout: 'story-map',
+  });
+  const indexHtml = await fs.readFile(path.join(project, 'index.html'), 'utf8');
+  assert.ok(indexHtml.includes('starter-defaults: lens=editorial-contrast theme=warm-editorial layout=story-map'));
+
+  const result = spawnSync(process.execPath, [
+    path.resolve('bin/openprd.js'),
+    'design-starter',
+    project,
+    '--starter',
+    'ops-dashboard',
+    '--out',
+    'dashboard.html',
+  ], {
+    cwd: path.resolve('.'),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /OpenPrd design starter: 已生成/);
+  assert.match(result.stdout, /默认组合: lens=operational-density theme=tool-neutral layout=ops-density-grid/);
+  assert.match(result.stdout, /只有确认当前页不依赖外部事实、品牌素材或真实图片时，才直接写清无依赖/);
+  assert.match(result.stdout, /先不要急着加 `--no-real-images`/);
+  assert.match(result.stdout, /禁止删除后重起/);
+  assert.ok(await pathExists(path.join(project, 'dashboard.html')));
+
+  const hydratedProject = await makeTempProject();
+  await initWorkspace(hydratedProject, { templatePack: 'consumer' });
+
+  const hydratedResult = spawnSync(process.execPath, [
+    path.resolve('bin/openprd.js'),
+    'design-starter',
+    hydratedProject,
+    '--starter',
+    'content-home',
+    '--out',
+    'hydrated.html',
+    '--title',
+    'One Person Build',
+    '--brief',
+    '写给独立开发者的个人博客首页',
+    '--sections',
+    '精选文章|写作主题|关于作者|订阅入口',
+    '--no-external-facts',
+    '--no-brand-assets',
+    '--no-real-images',
+  ], {
+    cwd: path.resolve('.'),
+    encoding: 'utf8',
+  });
+  assert.equal(hydratedResult.status, 0, hydratedResult.stderr);
+  assert.match(hydratedResult.stdout, /active design contracts: 已同步写实/);
+  assert.match(hydratedResult.stdout, /docs\/basic: 已同步写实/);
+  assert.match(hydratedResult.stdout, /文件说明书: 已补到 hydrated\.html/);
+  const hydratedHtml = await fs.readFile(path.join(hydratedProject, 'hydrated.html'), 'utf8');
+  assert.ok(hydratedHtml.startsWith('<!--\n## 核心功能'));
+  assert.ok(hydratedHtml.includes('One Person Build'));
+  assert.ok(hydratedHtml.includes('必须在当前入口文件上继续补丁修改'));
+  assert.equal(hydratedHtml.includes('长期写作首页'), false);
+  assert.equal(hydratedHtml.includes('阅读精选文章'), false);
+  assert.equal(hydratedHtml.includes('这一周我为什么先修产品边界，再补界面细节'), false);
+  assert.equal(hydratedHtml.includes('[品牌名 / 首页主题]'), false);
+  const factsSheet = await fs.readFile(path.join(hydratedProject, '.openprd', 'design', 'active', 'facts-sheet.md'), 'utf8');
+  assert.ok(factsSheet.includes('写给独立开发者的个人博客首页'));
+  assert.equal(factsSheet.includes('待填写'), false);
+  const frontendGuidelines = await fs.readFile(path.join(hydratedProject, 'docs', 'basic', 'frontend-guidelines.md'), 'utf8');
+  assert.equal(frontendGuidelines.includes('待补充'), false);
+  const rootReadmes = (await fs.readdir(hydratedProject)).filter((name) => name.endsWith('_README.md'));
+  assert.ok(rootReadmes.length > 0);
+
+  const guideProject = await makeTempProject();
+  await initWorkspace(guideProject, { templatePack: 'consumer' });
+  const blockedGuide = spawnSync(process.execPath, [
+    path.resolve('bin/openprd.js'),
+    'design-starter',
+    guideProject,
+    '--starter',
+    'content-home',
+    '--out',
+    'guide.html',
+    '--brief',
+    '西双版纳雨林观鸟导览首页',
+    '--sections',
+    '今日路线|关键物种|装备准备|最佳时段|预约提醒|订阅入口',
+    '--no-external-facts',
+    '--no-brand-assets',
+    '--no-real-images',
+  ], {
+    cwd: path.resolve('.'),
+    encoding: 'utf8',
+  });
+  assert.equal(blockedGuide.status, 1);
+  assert.match(blockedGuide.stdout, /不建议带 `--no-real-images`/);
+  assert.equal(await pathExists(path.join(guideProject, 'guide.html')), false);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes('commons.wikimedia.org/w/api.php')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            query: {
+              pages: {
+                1: {
+                  title: 'File:Xishuangbanna rainforest canopy.jpg',
+                  imageinfo: [{
+                    thumburl: 'https://example.com/image-1.jpg',
+                    descriptionurl: 'https://commons.wikimedia.org/wiki/File:Xishuangbanna_rainforest_canopy.jpg',
+                    extmetadata: {
+                      ImageDescription: { value: '西双版纳雨林 canopy' },
+                      LicenseShortName: { value: 'CC BY-SA 4.0' },
+                    },
+                  }],
+                },
+                2: {
+                  title: 'File:Birdwatching trail.jpg',
+                  imageinfo: [{
+                    thumburl: 'https://example.com/image-2.jpg',
+                    descriptionurl: 'https://commons.wikimedia.org/wiki/File:Birdwatching_trail.jpg',
+                    extmetadata: {
+                      ImageDescription: { value: '观鸟栈道' },
+                      LicenseShortName: { value: 'CC BY-SA 4.0' },
+                    },
+                  }],
+                },
+                3: {
+                  title: 'File:Tropical bird.jpg',
+                  imageinfo: [{
+                    thumburl: 'https://example.com/image-3.jpg',
+                    descriptionurl: 'https://commons.wikimedia.org/wiki/File:Tropical_bird.jpg',
+                    extmetadata: {
+                      ImageDescription: { value: '热带鸟类' },
+                      LicenseShortName: { value: 'CC BY-SA 4.0' },
+                    },
+                  }],
+                },
+              },
+            },
+          };
+        },
+      };
+    }
+    return {
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([255, 216, 255, 217]).buffer;
+      },
+      headers: {
+        get(name) {
+          return String(name).toLowerCase() === 'content-type' ? 'image/jpeg' : null;
+        },
+      },
+    };
+  };
+  try {
+    const guideResult = await designStarterWorkspace(guideProject, {
+      starter: 'content-home',
+      out: 'guide.html',
+      brief: '西双版纳雨林观鸟导览首页',
+      sections: '今日路线|关键物种|装备准备|最佳时段|预约提醒|订阅入口',
+      noExternalFacts: true,
+      noBrandAssets: true,
+    });
+    assert.equal(guideResult.ok, true);
+    assert.equal(guideResult.fetchedImageCount, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const guideHtml = await fs.readFile(path.join(guideProject, 'guide.html'), 'utf8');
+  assert.ok(guideHtml.includes('专题导览首页'));
+  assert.ok(guideHtml.includes('今日路线'));
+  assert.ok(guideHtml.includes('关键物种'));
+  assert.ok(guideHtml.includes('装备准备'));
+  assert.ok(guideHtml.includes('订阅后续更新'));
+  assert.equal(guideHtml.includes('独立开发者写作首页'), false);
+  assert.equal(guideHtml.includes('长期写作首页'), false);
+  const guideImagePreflight = await fs.readFile(path.join(guideProject, '.openprd', 'design', 'active', 'image-preflight.md'), 'utf8');
+  assert.ok(guideImagePreflight.includes('这一版已经按内容主题补齐首批真实图片'));
+  const guideManifest = JSON.parse(
+    await fs.readFile(path.join(guideProject, '.openprd', 'design', 'assets', 'fetched', 'content-home', 'manifest.json'), 'utf8')
+  );
+  assert.equal(guideManifest.assets.length, 3);
+
+  const standardsResult = spawnSync(process.execPath, [
+    path.resolve('bin/openprd.js'),
+    'standards',
+    hydratedProject,
+    '--verify',
+  ], {
+    cwd: path.resolve('.'),
+    encoding: 'utf8',
+  });
+  assert.equal(standardsResult.status, 0, standardsResult.stderr);
+  assert.match(standardsResult.stdout, /OpenPrd standards: 通过/);
+
+  const dashboardProject = await makeTempProject();
+  await initWorkspace(dashboardProject, { templatePack: 'consumer' });
+  const dashboardHydratedResult = spawnSync(process.execPath, [
+    path.resolve('bin/openprd.js'),
+    'design-starter',
+    dashboardProject,
+    '--starter',
+    'ops-dashboard',
+    '--out',
+    'index.html',
+    '--title',
+    '独立开发者内容发布工作台',
+    '--brief',
+    '为独立开发者提供安静、耐看、信息密度高的内容发布首页，帮助每天快速处理待发布事项、跟进草稿、查看订阅变化和选题推进。',
+    '--sections',
+    '今日待处理|草稿队列|本周指标|最近订阅变化|选题状态',
+    '--no-external-facts',
+    '--no-brand-assets',
+    '--no-real-images',
+  ], {
+    cwd: path.resolve('.'),
+    encoding: 'utf8',
+  });
+  assert.equal(dashboardHydratedResult.status, 0, dashboardHydratedResult.stderr);
+  const dashboardHtml = await fs.readFile(path.join(dashboardProject, 'index.html'), 'utf8');
+  assert.equal(dashboardHtml.includes('总览一'), false);
+  assert.equal(dashboardHtml.includes('关键指标'), false);
+  assert.ok(dashboardHtml.includes('最近订阅变化'));
+  assert.ok(dashboardHtml.includes('选题状态'));
+  assert.ok(dashboardHtml.includes('AI 协作复盘: 继续写'));
+});
+
 test('clarify stays inline and synthesize writes a review artifact', async () => {
   const project = await makeTempProject();
   await initWorkspace(project, { templatePack: 'agent' });
@@ -262,6 +852,9 @@ test('clarify stays inline and synthesize writes a review artifact', async () =>
   assert.ok(clarify.intakeReflectionPath);
   assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('我先用产品和业务语言复述一下')));
   assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('需求判断：')));
+  assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('第一批最容易触达')));
+  assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('先怎么手工交付')));
+  assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('什么承诺才算真需求')));
   assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('主要服务对象')));
   assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('第一版先让用户做到')));
   assert.ok(clarify.inlineClarification.lines.some((line) => line.includes('| 功能模块 |')));

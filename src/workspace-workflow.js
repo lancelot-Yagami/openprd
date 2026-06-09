@@ -17,6 +17,10 @@ function requirementGatePath(projectRoot) {
   return path.join(projectRoot, '.openprd', 'harness', 'requirement-gate.json');
 }
 
+function normalizedText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
 const PRD_REVIEW_STATUSES = ['pending-confirmation', 'confirmed', 'needs-revision'];
 const CURRENT_SNAPSHOT_CACHE_KEYS = [
   'versionId',
@@ -30,6 +34,7 @@ const CURRENT_SNAPSHOT_CACHE_KEYS = [
 const REVIEW_PRESENTATION_RELEVANT_FIELD_PREFIXES = [
   'problem.',
   'users.',
+  'validation.',
   'goals.',
   'scope.',
   'scenarios.',
@@ -56,6 +61,13 @@ const REVIEW_PRESENTATION_RELEVANT_OVERRIDE_KEYS = new Set([
   'primaryUsers',
   'secondaryUsers',
   'stakeholders',
+  'community',
+  'seedUsers',
+  'currentAlternative',
+  'manualPath',
+  'commitmentSignals',
+  'firstValidationStep',
+  'defaultAlivePlan',
   'goals',
   'successMetrics',
   'acceptanceGoals',
@@ -109,6 +121,13 @@ const SYNTHESIZE_CONTENT_OVERRIDE_KEYS = new Set([
   'primaryUsers',
   'secondaryUsers',
   'stakeholders',
+  'community',
+  'seedUsers',
+  'currentAlternative',
+  'manualPath',
+  'commitmentSignals',
+  'firstValidationStep',
+  'defaultAlivePlan',
   'goals',
   'successMetrics',
   'acceptanceGoals',
@@ -156,6 +175,29 @@ const SYNTHESIZE_CONTENT_OVERRIDE_KEYS = new Set([
   'stateModel',
   'evalPlan',
 ]);
+
+function buildBrainstormSuggestion({ currentState, analysis, clarification, requirementGate }) {
+  const promptPreview = String(requirementGate?.promptPreview ?? '');
+  const explicit = /(脑暴|brainstorm|帮忙梳理|梳理一下|梳理下|先想清楚)/iu.test(promptPreview);
+  const missingRequiredFields = Number(analysis?.missingRequiredFields ?? 0);
+  const noProblemStatement = !normalizedText(currentState?.problemStatement);
+  const noPrimaryUsers = !Array.isArray(currentState?.primaryUsers) || currentState.primaryUsers.length === 0;
+  const shouldSuggest = explicit || (clarification?.shouldAskUser && missingRequiredFields >= 4) || (noProblemStatement && noPrimaryUsers && missingRequiredFields >= 3);
+  if (!shouldSuggest) {
+    return { recommended: false };
+  }
+  const reasons = [];
+  if (explicit) reasons.push('用户当前更像是在请求先梳理业务方向');
+  if (missingRequiredFields >= 4) reasons.push(`还有 ${missingRequiredFields} 个关键信息未确认`);
+  if (noProblemStatement) reasons.push('问题定义还不够稳定');
+  if (noPrimaryUsers) reasons.push('核心用户和场景还没锁定');
+  return {
+    recommended: true,
+    explicitTrigger: explicit,
+    reason: reasons.join('；'),
+    suggestedCommand: 'openprd brainstorm . --open',
+  };
+}
 
 function normalizePrdReviewStatus(status) {
   return PRD_REVIEW_STATUSES.includes(status) ? status : 'pending-confirmation';
@@ -571,6 +613,37 @@ function collectProjectRiskProbes(gate, snapshot) {
   return probes;
 }
 
+function buildValidationFraming(sections = {}) {
+  const validation = sections.validation ?? {};
+  return {
+    community: shortList(validation.community, '需要先确认第一批最容易触达的社区、渠道或人群。'),
+    seedUsers: shortList(validation.seedUsers, '需要先确认第一批具体先找谁聊、先服务谁。'),
+    currentAlternative: shortList(validation.currentAlternative, '需要先确认他们现在主要靠什么替代方案在解决。'),
+    manualPath: shortList(validation.manualPath, '需要先确认不做完整产品时先怎么手工交付价值。'),
+    commitmentSignals: shortList(validation.commitmentSignals, '需要先确认什么真实承诺能证明不是口头兴趣。'),
+    firstValidationStep: shortList(validation.firstValidationStep, '需要先确认最低成本先做哪一步验证。'),
+    defaultAlivePlan: shortList(validation.defaultAlivePlan, '需要先确认验证阶段怎样先活下来。'),
+  };
+}
+
+function hasSatisfiedConfirmedClarificationWriteback({ gate, currentState, analysis, hasProductType }) {
+  if (!gateHasClarificationConfirmation(gate)) {
+    return false;
+  }
+  if (!hasProductType || Number(analysis?.missingRequiredFields ?? 0) > 0) {
+    return false;
+  }
+  const gateAt = requirementGateReferenceTimestamp(gate);
+  if (!gateAt) {
+    return false;
+  }
+  const confirmedCaptureAt = latestConfirmedClarificationCaptureTimestamp(currentState);
+  if (!confirmedCaptureAt || String(confirmedCaptureAt) < String(gateAt)) {
+    return false;
+  }
+  return !hasDerivedClarificationCaptureSince(currentState, gateAt);
+}
+
 function buildProjectFraming({ gate, snapshot, scenario, productType }) {
   const sections = snapshot.sections ?? {};
   const guardrailHints = [
@@ -578,6 +651,7 @@ function buildProjectFraming({ gate, snapshot, scenario, productType }) {
     ...normalizeTextList(sections.constraints?.dependencies),
   ];
   const riskProbes = collectProjectRiskProbes(gate, snapshot);
+  const validationFraming = buildValidationFraming(sections);
   return {
     audience: shortList(
       sections.users?.primaryUsers,
@@ -590,6 +664,7 @@ function buildProjectFraming({ gate, snapshot, scenario, productType }) {
     nonGoals: shortList(sections.scope?.outOfScope, '需要先确认本轮先不做什么。'),
     guardrails: shortList(guardrailHints, '需要先确认哪些现有能力、数据、流程或体验不能被破坏。'),
     architectureSignals: summarizeArchitectureSignals(gate, snapshot),
+    validationFraming,
     riskProbes,
     riskProbeSummary: shortList(riskProbes, '当前没有明显命中额外风险探针。'),
   };
@@ -866,6 +941,7 @@ function buildInlineClarification({ clarification, reflection, presentation }) {
   const prompt = reflection?.promptPreview || '本轮需求';
   const projectContext = reflection?.projectContext ?? {};
   const projectFraming = projectContext.projectFraming ?? {};
+  const validationFraming = projectFraming.validationFraming ?? {};
   const productType = projectContext.productType;
   const primaryQuestion = clarification.mustAskUser[0] ?? null;
   const followUpQuestions = clarification.mustAskUser.slice(1, presentation.mode === 'inline' ? 2 : 3);
@@ -896,6 +972,12 @@ function buildInlineClarification({ clarification, reflection, presentation }) {
     `- 第一版先让用户做到：${projectFraming.firstSlice ?? '待确认'}。`,
     `- 这轮先不碰：${projectFraming.nonGoals ?? '待确认'}。`,
     `- 必须守住：${projectFraming.guardrails ?? '待确认'}。`,
+    `- 第一批最容易触达：${validationFraming.community ?? '待确认'}。`,
+    `- 当前主要替代：${validationFraming.currentAlternative ?? '待确认'}。`,
+    `- 先怎么手工交付：${validationFraming.manualPath ?? '待确认'}。`,
+    `- 什么承诺才算真需求：${validationFraming.commitmentSignals ?? '待确认'}。`,
+    `- 最低成本先验证：${validationFraming.firstValidationStep ?? '待确认'}。`,
+    `- 怎么先活下来：${validationFraming.defaultAlivePlan ?? '待确认'}。`,
   ];
   if (projectFraming.architectureSignals) {
     lines.push(`- 这次更可能会影响：${projectFraming.architectureSignals}。`);
@@ -1016,6 +1098,11 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
     productType: snapshot.productType ?? resolveCurrentProductType(ws),
   });
   const lensQuestion = buildLensReflectionQuestion(snapshot.productType ?? resolveCurrentProductType(ws));
+  const validationLoopQuestion = reflectionQuestion(
+    'validation-loop',
+    '验证与创业闭环',
+    '请确认第一批最容易触达的社区或用户是谁、他们现在靠什么替代、如果先不做完整产品怎么手工交付、什么真实承诺最能证明值得继续，以及最低成本验证和先活下来底线是什么。'
+  );
   const needsDeliveryShapeQuestion = !needsInterfaceSketch
     && (
       projectFraming.riskProbes.length > 0
@@ -1025,6 +1112,7 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
     ? [
         reflectionQuestion('intent', '意图与目标', '请确认我理解得对不对：这次主要是谁在什么场景下遇到什么问题，第一版最想先改善什么结果？'),
         lensQuestion,
+        validationLoopQuestion,
         reflectionQuestion('project-context', '项目影响范围', '结合当前项目，请确认第一版最小可用切片是什么；哪些已有模块、入口、流程或历史需求必须复用，哪些可以调整？'),
         reflectionQuestion('scope-quality', '范围与验收', '请确认这次先做到哪一步就算有价值；哪些这轮先不动；哪些老用户习惯、现有业务结果或交付节奏不能被影响？'),
         needsInterfaceSketch
@@ -1077,6 +1165,7 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
           `当前产品：${productName}；当前产品场景：${formatProductTypeDisplay(productType, { fallback: '待确认' })}；已记录问题：${currentProblem}`,
           `当前范围线索：${currentScope}`,
           `首轮画像：用户群体=${projectFraming.audience}；产品形态=${projectFraming.productShape}；第一版先做=${projectFraming.firstSlice}`,
+          `验证闭环：可触达人群=${projectFraming.validationFraming?.community}；当前替代=${projectFraming.validationFraming?.currentAlternative}；手工路径=${projectFraming.validationFraming?.manualPath}`,
           activeChange ? `仍有 active change：${activeChange.activeChange}（${activeChange.status}），需要和本轮需求分开评估。` : '当前没有检测到 active change 冲突。',
         ],
       },
@@ -1086,6 +1175,7 @@ async function buildRequirementIntakeReflection({ projectRoot, ws, snapshot, ana
         findings: [
           `仍需确认的信息：${shortList(missing, '暂无明显缺口')}`,
           `边界与约束：先不做=${projectFraming.nonGoals}；不能破坏=${projectFraming.guardrails}`,
+          `商业验证：承诺信号=${projectFraming.validationFraming?.commitmentSignals}；低成本验证=${projectFraming.validationFraming?.firstValidationStep}；先活下来=${projectFraming.validationFraming?.defaultAlivePlan}`,
           needsInterfaceSketch ? '需求看起来涉及界面或流程，需要先给用户确认草图或关键操作路径。' : `影响环节：${projectFraming.architectureSignals}`,
           `业务提醒：${projectFraming.riskProbeSummary}`,
           '进入实现前必须保留范围、非目标、异常路径和验收证据。',
@@ -1124,6 +1214,12 @@ function renderRequirementIntakeReflection(reflection) {
     `| 第一版先做 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.firstSlice ?? '待补充')} |`,
     `| 暂不处理 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.nonGoals ?? '待补充')} |`,
     `| 不能破坏 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.guardrails ?? '待补充')} |`,
+    `| 可触达人群 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.community ?? '待补充')} |`,
+    `| 当前替代 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.currentAlternative ?? '待补充')} |`,
+    `| 手工路径 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.manualPath ?? '待补充')} |`,
+    `| 承诺信号 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.commitmentSignals ?? '待补充')} |`,
+    `| 最低成本验证 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.firstValidationStep ?? '待补充')} |`,
+    `| 先活下来 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.validationFraming?.defaultAlivePlan ?? '待补充')} |`,
     `| 影响环节 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.architectureSignals ?? '待补充')} |`,
     `| 业务提醒 | ${escapeMarkdownTableCell(reflection.projectContext.projectFraming?.riskProbeSummary ?? '待补充')} |`,
     '',
@@ -1157,6 +1253,7 @@ function buildRequirementIntakeDepth(gate, reflection = null) {
   const fallbackLayers = [
     reflectionQuestion('product-context', '用户 / 产品形态 / 问题', '先确认：这是给谁用的、它更像个人产品 / 团队流程 / Agent 协作中的哪一种、为什么现在值得解决？'),
     reflectionQuestion('product-outcome', '第一版切片 / 目标 / 成功标准', '请确认第一版最小可用切片是什么；解决后用户先能完成什么，用什么业务结果或验收标准判断有效？'),
+    reflectionQuestion('product-validation', '验证闭环 / 承诺信号', '请确认第一批最容易触达的社区或用户是谁、他们现在靠什么替代、如果先不做完整产品怎么手工交付、什么真实承诺最能证明值得继续，以及最低成本验证和先活下来底线是什么。'),
     reflectionQuestion('product-flow', '范围 / 非目标 / 异常路径', '请拆出本轮先做什么、不做什么、哪些既有行为不能被破坏，以及关键失败路径和恢复方式。'),
     reflectionQuestion(
       'product-detail',
@@ -1981,6 +2078,12 @@ async function computeWorkspaceGuidance(ws, options = {}) {
   const scenario = await detectWorkspaceScenario(ws.projectRoot, ws, versionIndex);
   const requirementGate = await readActiveRequirementGate(ws.projectRoot);
   const intakeSatisfiedByReview = prdReviewState.status === 'confirmed' && analysis.missingRequiredFields === 0;
+  const intakeSatisfiedByConfirmedWriteback = hasSatisfiedConfirmedClarificationWriteback({
+    gate: requirementGate,
+    currentState,
+    analysis,
+    hasProductType,
+  });
   const intakeReflection = await buildRequirementIntakeReflection({
     projectRoot: ws.projectRoot,
     ws,
@@ -1997,7 +2100,9 @@ async function computeWorkspaceGuidance(ws, options = {}) {
     captureMeta: currentState.captureMeta ?? {},
     prdReviewState,
     limit: Number(options.questionLimit ?? 5),
-  }), requirementGate, intakeReflection, { satisfied: intakeSatisfiedByReview });
+  }), requirementGate, intakeReflection, {
+    satisfied: intakeSatisfiedByReview || intakeSatisfiedByConfirmedWriteback,
+  });
 
   let nextAction = 'synthesize';
   let reason = 'PRD 可以合成为第一个版本。';
@@ -2057,6 +2162,12 @@ async function computeWorkspaceGuidance(ws, options = {}) {
 
   const taskGraph = buildWorkflowTaskGraph(analysisSnapshot, analysis, { diagramState, prdReviewState, clarificationState: clarification });
   const gates = deriveGateLabels({ nextAction, diagramState, clarification });
+  const brainstormSuggestion = buildBrainstormSuggestion({
+    currentState,
+    analysis,
+    clarification,
+    requirementGate,
+  });
 
   return {
     versionIndex,
@@ -2072,6 +2183,7 @@ async function computeWorkspaceGuidance(ws, options = {}) {
     suggestedCommand,
     suggestedQuestions,
     gates,
+    brainstormSuggestion,
   };
 }
 
@@ -2135,7 +2247,8 @@ async function nextWorkspace(projectRoot) {
       currentGate: gates.currentGate,
       upcomingGate: gates.upcomingGate,
     },
-    workflow: ['clarify', 'classify', 'interview', 'synthesize', 'diagram', 'review', 'freeze', 'handoff'],
+    brainstormSuggestion: guidance.brainstormSuggestion,
+    workflow: ['brainstorm', 'clarify', 'classify', 'interview', 'synthesize', 'diagram', 'review', 'freeze', 'handoff'],
   };
 }
 

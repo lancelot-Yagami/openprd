@@ -31,6 +31,16 @@ quality:
   enabled: true
   command: openprd quality . --verify
   reportFormat: html
+design:
+  enabled: true
+  frameworkRoot: .openprd/design
+  templateRoot: .openprd/design/templates
+  activeArtifacts:
+    facts: .openprd/design/active/facts-sheet.md
+    assets: .openprd/design/active/asset-spec.md
+    imagePreflight: .openprd/design/active/image-preflight.md
+    directions: .openprd/design/active/direction-plan.md
+    selectedDirection: .openprd/design/active/selected-direction.md
 qualityGates:
   standards:
     docsRoot: docs/basic

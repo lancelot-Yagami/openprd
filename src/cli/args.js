@@ -19,7 +19,7 @@
  */
 function parseCommandArgs(argv) {
   const args = [...argv];
-  const flags = { json: false, force: false, fix: false, open: false, append: false, init: false, check: false, review: false, reject: false, resume: false, advance: false, verify: false, evidenceRequired: false, next: false, generate: false, validate: false, apply: false, archive: false, activate: false, close: false, keep: false, write: false, dryRun: false, repairAgent: false, fleet: false, updateOpenprd: false, backfillWorkUnits: false, syncRegistry: false, setupMissing: false, doctor: false, context: false, recordHook: false, hookInject: false, plan: false, prompt: false, loopRun: false, finish: false, commit: false, html: false, template: false, failOnViolation: false, mark: null, type: 'architecture', mode: 'auto', input: null, field: null, value: null, set: null, jsonFile: null, artifactMarkdown: null, contentJson: null, presentation: null, source: null, reference: null, actual: null, before: null, after: null, board: null, out: null, format: null, quality: null, maxPanelWidth: null, referenceLabel: null, actualLabel: null, classifyExternal: null, maxIterations: null, maxDepth: null, include: null, exclude: null, report: null, item: null, id: null, status: null, claim: null, notes: null, reason: null, confidence: null, threshold: null, change: null, tools: 'all', hookProfile: null, templatePack: null, target: 'openprd', targetRoot: null, path: null, productType: null, title: null, owner: null, problem: null, whyNow: null, evidence: null, from: null, to: null, version: null, digest: null, workUnit: null, event: null, risk: null, outcome: null, preview: null, learn: null, genre: null, style: null, topic: null, enable: false, disable: false, agent: 'codex', agentCommand: null, message: null };
+  const flags = { json: false, force: false, fix: false, open: false, append: false, init: false, check: false, review: false, reject: false, resume: false, advance: false, verify: false, evidenceRequired: false, next: false, generate: false, validate: false, apply: false, archive: false, activate: false, close: false, keep: false, write: false, dryRun: false, repairAgent: false, allowDirtyMain: false, fleet: false, updateOpenprd: false, backfillWorkUnits: false, syncRegistry: false, setupMissing: false, doctor: false, context: false, recordHook: false, hookInject: false, plan: false, prompt: false, loopRun: false, finish: false, commit: false, html: false, template: false, failOnViolation: false, noExternalFacts: false, noBrandAssets: false, noRealImages: false, mark: null, type: 'architecture', mode: 'auto', input: null, field: null, value: null, set: null, jsonFile: null, artifactMarkdown: null, contentJson: null, presentation: null, source: null, reference: null, actual: null, before: null, after: null, board: null, grid: null, boxes: null, out: null, format: null, quality: null, maxPanelWidth: null, referenceLabel: null, actualLabel: null, classifyExternal: null, maxIterations: null, maxDepth: null, include: null, exclude: null, report: null, item: null, id: null, status: null, claim: null, notes: null, reason: null, confidence: null, threshold: null, change: null, starter: null, sections: null, brief: null, tools: 'all', hookProfile: null, templatePack: null, target: 'openprd', targetRoot: null, path: null, productType: null, title: null, owner: null, problem: null, whyNow: null, evidence: null, from: null, to: null, version: null, digest: null, workUnit: null, event: null, risk: null, outcome: null, preview: null, learn: null, genre: null, style: null, topic: null, enable: false, disable: false, agent: 'codex', agentCommand: null, worktree: null, branch: null, message: null };
   const positionals = [];
 
   while (args.length > 0) {
@@ -118,6 +118,10 @@ function parseCommandArgs(argv) {
     }
     if (arg === '--repair-agent') {
       flags.repairAgent = true;
+      continue;
+    }
+    if (arg === '--allow-dirty-main') {
+      flags.allowDirtyMain = true;
       continue;
     }
     if (arg === '--fleet') {
@@ -220,6 +224,14 @@ function parseCommandArgs(argv) {
       flags.agentCommand = args.shift() ?? null;
       continue;
     }
+    if (arg === '--worktree') {
+      flags.worktree = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--branch') {
+      flags.branch = args.shift() ?? null;
+      continue;
+    }
     if (arg === '--product-type' || arg === '-P') {
       flags.productType = args.shift() ?? null;
       continue;
@@ -286,6 +298,14 @@ function parseCommandArgs(argv) {
     }
     if (arg === '--board') {
       flags.board = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--grid') {
+      flags.grid = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--boxes') {
+      flags.boxes = args.shift() ?? null;
       continue;
     }
     if (arg === '--out') {
@@ -370,6 +390,30 @@ function parseCommandArgs(argv) {
     }
     if (arg === '--change') {
       flags.change = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--starter') {
+      flags.starter = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--brief') {
+      flags.brief = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--sections') {
+      flags.sections = args.shift() ?? null;
+      continue;
+    }
+    if (arg === '--no-external-facts') {
+      flags.noExternalFacts = true;
+      continue;
+    }
+    if (arg === '--no-brand-assets') {
+      flags.noBrandAssets = true;
+      continue;
+    }
+    if (arg === '--no-real-images') {
+      flags.noRealImages = true;
       continue;
     }
     if (arg === '--title') {
@@ -478,26 +522,30 @@ function usage() {
     '  openprd init [path] [--template-pack <base|consumer|b2b|agent>] [--tools <all|codex,claude,cursor>] [--hook-profile <lite|guarded|full>] [--force]',
     '  openprd setup [path] [--tools <all|codex,claude,cursor>] [--hook-profile <lite|guarded|full>] [--force] [--json]',
     '  openprd update [path] [--tools <all|codex,claude,cursor>] [--hook-profile <lite|guarded|full>] [--force] [--json]',
-    '  openprd self-update [--dry-run] [--json]',
+    '  openprd self-update [--check] [--dry-run] [--json]',
     '  openprd upgrade [path] [--fleet] [--dry-run] [--tools <all|codex,claude,cursor>] [--hook-profile <lite|guarded|full>] [--max-depth <n>] [--include <csv>] [--exclude <csv>] [--report <file>] [--force] [--json]',
     '  openprd doctor [path] [--tools <all|codex,claude,cursor>] [--hook-profile <lite|guarded|full>] [--fix] [--json]',
     '  openprd fleet <root> [--dry-run|--doctor|--update-openprd|--backfill-work-units|--sync-registry|--setup-missing] [--hook-profile <lite|guarded|full>] [--max-depth <n>] [--include <csv>] [--exclude <csv>] [--report <file>] [--json]',
     '  openprd run [path] [--context|--verify|--record-hook --event <name> --risk <level> --outcome <text> --preview <text>] [--message <text>] [--json]',
-    '  openprd loop [path] [--init|--plan|--next|--prompt|--run|--verify|--finish] [--change <id>] [--item <task-id-or-handle>] [--agent <codex|claude>] [--agent-command <cmd>] [--repair-agent] [--commit] [--dry-run] [--message <text>] [--json]',
+    '  openprd loop [path] [--init|--plan|--next|--prompt|--run|--verify|--finish] [--change <id>] [--item <task-id-or-handle>] [--agent <codex|claude>] [--agent-command <cmd>] [--repair-agent] [--worktree <path>] [--branch <name>] [--allow-dirty-main] [--commit] [--dry-run] [--message <text>] [--json]',
     '  openprd classify [path] <consumer|b2b|agent>',
     '  openprd clarify [path] [--mode <auto|inline|inline-with-checklist>] [--json]',
     '  openprd capture [path] (--field <section.path> --value <text|json> | --json-file <answers.json> | --artifact-markdown <artifact.md>) [--source <user-confirmed|project-derived|agent-inferred|agent-normalized>] [--append] [--json]',
     '  openprd interview [path] [--product-type <consumer|b2b|agent>]',
     '  openprd playground [path] [--open] [--json]',
+    '  openprd brainstorm [path] [--topic <text>] [--open] [--json]',
     '  openprd learn [path] [--topic <text>] [--genre <internet-product|scientific|fairy-tale|web-novel|xianxia>] [--style <substyle>] [--source <workspace|docs|loop|all>] [--content-json <file>] [--open] [--enable|--disable] [--json]',
     '  openprd quality [path] [--init|--verify|--report --html|--learn [--review] --from <report-id-or-json-or-diagnostics-or-turn-state>] [--force] [--json]',
     '  openprd knowledge <candidates|reject|archive|restore> [path-or-id] [--status <pending-review|all|rejected|archived|promoted|merged>] [--id <candidate-id>] [--reason <text>] [--json]',
+    '  openprd visual-prepare [path] --reference <effect-image> ((--grid <columns>x<rows>) | (--boxes <plan.json>)) [--include <csv>] [--id <reference-set-id>] [--title <text>] [--out <dir>] [--json]',
     '  openprd visual-compare [path] ((--reference <effect-image> --actual <screenshot-image>) | (--before <before-screenshot> --after <after-screenshot>) | --board <board.json>) [--out <file.jpg>] [--format <jpg|png|webp>] [--quality <1..100>] [--max-panel-width <px>] [--json]',
+    '  openprd design-starter [path] [--starter <content-home|product-launch|ops-dashboard>] [--out <index.html>] [--title <name>] [--brief <text>] [--sections <a|b|c>] [--no-external-facts] [--no-brand-assets] [--no-real-images] [--force] [--json]',
     '  openprd dev-check [path] <file...> [--json]',
     '  openprd grow [path] [--review|--apply --id <candidate-id>|--reject --id <candidate-id>|--init|--check] [--notes <text>] [--json]',
     '  openprd benchmark <add|observe|list|approve|verify> [target-or-id] [path-for-list-or-verify] [--path <project>] [--notes <text>] [--threshold <n>] [--id <benchmark-id>] [--json]',
     '  openprd synthesize [path] [--title <text>] [--owner <text>] [--problem <text>] [--why-now <text>] [--work-unit <id>] [--target-root <path>] [--open] [--json]',
     '  openprd review [path] [--open] [--mark <pending-confirmation|confirmed|needs-revision>] [--version <id>] [--digest <sha256>] [--work-unit <id>] [--notes <text>] [--json]',
+    '  openprd brainstorm-presentation [path] [--template] [--presentation <json>] [--write] [--fail-on-violation] [--json]',
     '  openprd review-presentation [path] [--template] [--version <id>] [--presentation <json>] [--write] [--fail-on-violation] [--json]',
     '  openprd diagram [path] [--type <architecture|product-flow>] [--input <contract.json>] [--mark <pending-confirmation|confirmed|needs-revision>] [--open] [--json]',
     '  openprd diff [path] [--from <version>] [--to <version>]',

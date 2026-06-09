@@ -6,7 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 
 import { buildReviewExportPayload, renderReviewArtifact } from '../../src/html-artifacts.js';
-import { addBenchmarkWorkspace, advanceOpenSpecTaskWorkspace, applyGrowthCandidateWorkspace, applyOpenPrdChangeWorkspace, approveBenchmarkWorkspace, archiveOpenPrdChangeWorkspace, captureWorkspace, checkDevelopmentStandardsWorkspace, checkStandardsWorkspace, clarifyWorkspace, classifyExternalReferenceWorkspace, classifyWorkspace, diagramWorkspace, diffWorkspace, doctorWorkspace, finishLoopWorkspace, fleetWorkspace, freezeWorkspace, generateLearningReviewWorkspace, generateOpenSpecChangeWorkspace, handoffWorkspace, historyWorkspace, initLoopWorkspace, initQualityWorkspace, initWorkspace, interviewWorkspace, learnQualityWorkspace, listAcceptedSpecsWorkspace, listBenchmarkWorkspace, listOpenPrdChangesWorkspace, listOpenSpecTaskWorkspace, main, nextLoopWorkspace, nextWorkspace, observeBenchmarkSourceWorkspace, openspecDiscoveryWorkspace, planLoopWorkspace, playgroundWorkspace, promptLoopWorkspace, releaseWorkspace, reviewGrowthWorkspace, reviewPresentationWorkspace, reviewWorkspace, runLoopWorkspace, runWorkspace, setLearningReviewModeWorkspace, setupAgentIntegrationWorkspace, statusLoopWorkspace, synthesizeWorkspace as synthesizeWorkspaceBase, updateAgentIntegrationWorkspace, validateOpenSpecChangeWorkspace, validateWorkspace, verifyBenchmarkWorkspace, verifyLoopWorkspace, verifyQualityWorkspace, visualCompareWorkspace } from '../../src/openprd.js';
+import { addBenchmarkWorkspace, advanceOpenSpecTaskWorkspace, applyGrowthCandidateWorkspace, applyOpenPrdChangeWorkspace, approveBenchmarkWorkspace, archiveOpenPrdChangeWorkspace, brainstormPresentationWorkspace, brainstormWorkspace, captureWorkspace, checkDevelopmentStandardsWorkspace, checkStandardsWorkspace, clarifyWorkspace, classifyExternalReferenceWorkspace, classifyWorkspace, designStarterWorkspace, diagramWorkspace, diffWorkspace, doctorWorkspace, finishLoopWorkspace, fleetWorkspace, freezeWorkspace, generateLearningReviewWorkspace, generateOpenSpecChangeWorkspace, handoffWorkspace, historyWorkspace, initLoopWorkspace, initQualityWorkspace, initWorkspace, interviewWorkspace, learnQualityWorkspace, listAcceptedSpecsWorkspace, listBenchmarkWorkspace, listOpenPrdChangesWorkspace, listOpenSpecTaskWorkspace, main, nextLoopWorkspace, nextWorkspace, observeBenchmarkSourceWorkspace, openspecDiscoveryWorkspace, planLoopWorkspace, playgroundWorkspace, promptLoopWorkspace, releaseWorkspace, reviewGrowthWorkspace, reviewPresentationWorkspace, reviewWorkspace, runLoopWorkspace, runWorkspace, setLearningReviewModeWorkspace, setupAgentIntegrationWorkspace, statusLoopWorkspace, synthesizeWorkspace as synthesizeWorkspaceBase, updateAgentIntegrationWorkspace, validateOpenSpecChangeWorkspace, validateWorkspace, verifyBenchmarkWorkspace, verifyLoopWorkspace, verifyQualityWorkspace, visualCompareWorkspace, visualPrepareWorkspace } from '../../src/openprd.js';
 import { archiveKnowledgeCandidate, listKnowledgeCandidates, rejectKnowledgeCandidate, restoreKnowledgeCandidate } from '../../src/knowledge.js';
 import { checkCodexCliHealth, ensureCodexCliReady } from '../../src/codex-runtime.js';
 import { createRunWorkspace } from '../../src/run-harness.js';
@@ -26,12 +26,15 @@ export {
   applyOpenPrdChangeWorkspace,
   approveBenchmarkWorkspace,
   archiveOpenPrdChangeWorkspace,
+  brainstormPresentationWorkspace,
+  brainstormWorkspace,
   captureWorkspace,
   checkDevelopmentStandardsWorkspace,
   checkStandardsWorkspace,
   clarifyWorkspace,
   classifyExternalReferenceWorkspace,
   classifyWorkspace,
+  designStarterWorkspace,
   diagramWorkspace,
   diffWorkspace,
   doctorWorkspace,
@@ -76,6 +79,7 @@ export {
   verifyLoopWorkspace,
   verifyQualityWorkspace,
   visualCompareWorkspace,
+  visualPrepareWorkspace,
   archiveKnowledgeCandidate,
   listKnowledgeCandidates,
   rejectKnowledgeCandidate,
@@ -85,8 +89,8 @@ export {
   createRunWorkspace,
 };
 
-export const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(apply_patch|Write|Edit)$';
-export const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|apply_patch|Write|Edit)$';
+export const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(Bash|Read|Write|Edit|MultiEdit|apply_patch|WebSearch|web_search)$';
+export const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|Read|Glob|Grep|LS|Write|Edit|MultiEdit|apply_patch|WebSearch|web_search)$';
 export const TEST_OPENPRD_HOME = path.join(os.tmpdir(), 'openprd-test-home');
 
 process.env.OPENPRD_HOME = TEST_OPENPRD_HOME;
@@ -203,6 +207,18 @@ export async function writeFakeCodexBin(project) {
 
 export async function writeLoopProject(project, changeId = 'loop-demo') {
   await initWorkspace(project, { templatePack: 'consumer' });
+  const gitignorePath = path.join(project, '.gitignore');
+  const gitignoreText = await fs.readFile(gitignorePath, 'utf8').catch(() => '');
+  const requiredIgnores = [
+    '.openprd/harness/',
+    '.openprd/learning/',
+    '.openprd/quality/reports/',
+  ];
+  const missingIgnores = requiredIgnores.filter((entry) => !gitignoreText.includes(entry));
+  if (missingIgnores.length > 0) {
+    const nextGitignore = `${gitignoreText.trimEnd()}\n${missingIgnores.join('\n')}\n`;
+    await fs.writeFile(gitignorePath, nextGitignore);
+  }
   await writeConcreteBasicDocs(project, 'src/api/handler.js');
   await fs.writeFile(path.join(project, 'package.json'), `${JSON.stringify({
     type: 'module',

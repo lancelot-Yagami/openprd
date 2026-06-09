@@ -42,6 +42,24 @@ const LOOP_SESSIONS = path.join('.openprd', 'harness', 'agent-sessions.jsonl');
 const LOOP_BOOTSTRAP = path.join('.openprd', 'harness', 'bootstrap.sh');
 const LOOP_PROMPTS_DIR = path.join('.openprd', 'harness', 'loop-prompts');
 const LOOP_TEST_REPORTS_DIR = path.join('.openprd', 'harness', 'test-reports');
+const RELEASE_LEDGER = path.join('.openprd', 'state', 'release-ledger.json');
+const LOOP_OPERATIONAL_ARTIFACT_PATTERNS = [
+  '.openprd/engagements/**',
+  '.openprd/growth/events.jsonl',
+  '.openprd/growth/ledger.json',
+  '.openprd/knowledge/**',
+  '.openprd/learning/**',
+  '.openprd/quality/reports/**',
+  '.openprd/state/changes.json',
+  '.openprd/state/current.json',
+  '.openprd/state/events.jsonl',
+  '.openprd/state/task-graph.json',
+  '.openprd/state/version-index.json',
+];
+const LOOP_INTERNAL_STATE_PATTERNS = [
+  '.openprd/harness/**',
+  ...LOOP_OPERATIONAL_ARTIFACT_PATTERNS,
+];
 const LOOP_AGENT_VALUES = ['codex', 'claude'];
 
 function cjoin(...parts) {
@@ -115,6 +133,42 @@ function normalizeTaskReference(value) {
     .toLowerCase();
 }
 
+function toPosixPath(value) {
+  return String(value ?? '').split(path.sep).join('/');
+}
+
+function normalizeLoopModuleName(raw, fallback = 'project') {
+  const candidate = String(raw ?? '').trim().split('/').filter(Boolean).pop() ?? '';
+  const normalized = candidate.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function globToRegExp(pattern) {
+  const escaped = toPosixPath(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\u0000')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\u0000/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+function matchesPattern(relativePath, patterns = []) {
+  const normalized = toPosixPath(relativePath).replace(/^\/+/, '');
+  return patterns.some((pattern) => globToRegExp(pattern).test(normalized));
+}
+
+function uniquePaths(paths = []) {
+  const seen = new Set();
+  const ordered = [];
+  for (const item of paths) {
+    const normalized = toPosixPath(item).replace(/^\/+/, '');
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    ordered.push(normalized);
+  }
+  return ordered;
+}
+
 function taskReferenceCandidates(task) {
   return new Set([
     task.id,
@@ -169,6 +223,12 @@ async function ensureLoopFiles(projectRoot) {
       currentTaskId: null,
       currentTaskHandle: null,
       currentTaskTitle: null,
+      currentTaskBaselinePaths: [],
+      currentWorktreePath: path.resolve(projectRoot),
+      currentBranch: null,
+      lastWorktreePath: path.resolve(projectRoot),
+      lastBranch: null,
+      lastCommitSha: null,
       completedTaskIds: [],
       lastAgent: null,
       lastSessionAt: null,
@@ -294,6 +354,32 @@ async function readFeatureList(projectRoot) {
   return readJson(filePath);
 }
 
+async function readLoopState(projectRoot) {
+  const filePath = harnessPath(projectRoot, LOOP_STATE);
+  if (!(await exists(filePath))) return null;
+  return readJson(filePath);
+}
+
+async function resolveLoopWorkspace(projectRoot, options = {}) {
+  const workspace = await createOrAttachLoopWorktree(projectRoot, options);
+  if (!workspace.ok) {
+    return {
+      ok: false,
+      projectRoot: path.resolve(projectRoot),
+      sourceProjectRoot: path.resolve(projectRoot),
+      created: false,
+      syncedPaths: [],
+      git: null,
+      errors: workspace.errors ?? ['无法准备 loop 工作区。'],
+    };
+  }
+  await ensureLoopFiles(workspace.projectRoot);
+  return {
+    ...workspace,
+    git: workspace.git?.ok ? workspace.git : null,
+  };
+}
+
 function buildLoopSummary(featureList) {
   const tasks = featureList?.tasks ?? [];
   return {
@@ -369,6 +455,303 @@ async function updateLoopState(projectRoot, patch) {
   };
   await writeJson(statePath, next);
   return next;
+}
+
+function parseGitStatusLine(line) {
+  const status = line.slice(0, 2);
+  const payload = line.slice(3).trim();
+  const filePath = payload.includes(' -> ')
+    ? payload.split(' -> ').at(-1)
+    : payload;
+  return {
+    status,
+    path: toPosixPath(filePath),
+  };
+}
+
+async function gitStatusEntries(projectRoot) {
+  const status = await runCommand('git', ['status', '--porcelain=1', '--untracked-files=all'], { cwd: projectRoot });
+  if (!status.ok) {
+    return { ok: false, entries: [], status };
+  }
+  const entries = status.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => parseGitStatusLine(line));
+  return { ok: true, entries, status };
+}
+
+async function inspectGitWorkspace(projectRoot) {
+  const topLevel = await runCommand('git', ['rev-parse', '--show-toplevel'], { cwd: projectRoot });
+  if (!topLevel.ok) {
+    return {
+      ok: false,
+      projectRoot,
+      error: trimOutput(topLevel.stderr || topLevel.stdout) || '当前目录不是 Git 工作区。',
+    };
+  }
+  const branchResult = await runCommand('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: projectRoot });
+  const gitDirResult = await runCommand('git', ['rev-parse', '--path-format=absolute', '--git-dir'], { cwd: projectRoot });
+  const commonDirResult = await runCommand('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: projectRoot });
+  const headResult = await runCommand('git', ['rev-parse', '--short', 'HEAD'], { cwd: projectRoot });
+  const gitLinkPath = path.join(projectRoot, '.git');
+  let isMainWorktree = false;
+  try {
+    const stat = await fs.lstat(gitLinkPath);
+    isMainWorktree = stat.isDirectory();
+  } catch {
+    isMainWorktree = false;
+  }
+  const normalizeExistingPath = async (value) => {
+    const resolved = path.resolve(projectRoot, value);
+    return fs.realpath(resolved).catch(() => resolved);
+  };
+  const branch = branchResult.ok ? branchResult.stdout.trim() || null : null;
+  const repoRoot = await normalizeExistingPath(topLevel.stdout.trim());
+  const worktreePath = await normalizeExistingPath(projectRoot);
+  const gitDir = gitDirResult.ok ? await normalizeExistingPath(gitDirResult.stdout.trim()) : null;
+  const commonDir = commonDirResult.ok ? await normalizeExistingPath(commonDirResult.stdout.trim()) : null;
+  return {
+    ok: true,
+    projectRoot: worktreePath,
+    repoRoot,
+    worktreePath,
+    branch,
+    detachedHead: !branch,
+    headSha: headResult.ok ? headResult.stdout.trim() || null : null,
+    gitDir,
+    commonDir,
+    isMainWorktree,
+  };
+}
+
+async function copyRelativePath(sourceRoot, targetRoot, relativePath, options = {}) {
+  const sourcePath = harnessPath(sourceRoot, relativePath);
+  const targetPath = harnessPath(targetRoot, relativePath);
+  if (!(await exists(sourcePath))) return false;
+  if (!options.force && await exists(targetPath)) return false;
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  const stat = await fs.stat(sourcePath);
+  await fs.cp(sourcePath, targetPath, { recursive: stat.isDirectory(), force: true });
+  return true;
+}
+
+async function syncLoopIsolationArtifacts(sourceRoot, targetRoot, options = {}) {
+  if (path.resolve(sourceRoot) === path.resolve(targetRoot)) {
+    return [];
+  }
+  const copied = [];
+  const relativePaths = [
+    LOOP_FEATURE_LIST,
+    LOOP_PROGRESS,
+    LOOP_FAILED_APPROACHES,
+    LOOP_SESSIONS,
+    LOOP_STATE,
+    LOOP_BOOTSTRAP,
+    RELEASE_LEDGER,
+    options.change ? path.join('openprd', 'changes', options.change) : null,
+  ].filter(Boolean);
+  for (const relativePath of relativePaths) {
+    if (await copyRelativePath(sourceRoot, targetRoot, relativePath, { force: Boolean(options.force) })) {
+      copied.push(relativePath);
+    }
+  }
+  return copied;
+}
+
+async function createOrAttachLoopWorktree(projectRoot, options = {}) {
+  const sourceRoot = path.resolve(projectRoot);
+  const requestedWorktree = options.worktree
+    ? path.resolve(projectRoot, options.worktree)
+    : null;
+  if (options.branch && !requestedWorktree) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: ['--branch 需要和 --worktree 一起使用。'],
+    };
+  }
+  if (!requestedWorktree) {
+    return {
+      ok: true,
+      projectRoot: sourceRoot,
+      sourceProjectRoot: sourceRoot,
+      created: false,
+      syncedPaths: [],
+      git: await inspectGitWorkspace(sourceRoot),
+    };
+  }
+  if (!options.branch && !(await exists(requestedWorktree))) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: ['首次接入隔离 worktree 时，需要同时传入 --branch，或者先手动准备好目标 worktree。'],
+    };
+  }
+
+  const sourceGit = await inspectGitWorkspace(sourceRoot);
+  if (!sourceGit.ok) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: [sourceGit.error ?? '当前目录不是 Git 工作区，无法创建隔离 worktree。'],
+    };
+  }
+
+  let created = false;
+  if (!(await exists(requestedWorktree))) {
+    await fs.mkdir(path.dirname(requestedWorktree), { recursive: true });
+    const branchRef = `refs/heads/${options.branch}`;
+    const branchExists = await runCommand('git', ['show-ref', '--verify', '--quiet', branchRef], { cwd: sourceRoot });
+    const args = branchExists.ok
+      ? ['worktree', 'add', requestedWorktree, options.branch]
+      : ['worktree', 'add', '-b', options.branch, requestedWorktree, 'HEAD'];
+    const createdWorktree = await runCommand('git', args, { cwd: sourceRoot });
+    if (!createdWorktree.ok) {
+      return {
+        ok: false,
+        projectRoot: sourceRoot,
+        errors: [`创建隔离 worktree 失败: ${trimOutput(createdWorktree.stderr || createdWorktree.stdout)}`],
+      };
+    }
+    created = true;
+  }
+
+  const targetGit = await inspectGitWorkspace(requestedWorktree);
+  if (!targetGit.ok) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: [targetGit.error ?? '目标路径不是可用的 Git worktree。'],
+    };
+  }
+  if (sourceGit.commonDir && targetGit.commonDir && sourceGit.commonDir !== targetGit.commonDir) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: ['目标 worktree 不属于当前仓库，不能用于这次 loop 运行。'],
+    };
+  }
+  if (options.branch && targetGit.branch !== options.branch) {
+    return {
+      ok: false,
+      projectRoot: sourceRoot,
+      errors: [`目标 worktree 当前在分支 ${targetGit.branch ?? 'detached HEAD'}，与请求的 ${options.branch} 不一致。`],
+    };
+  }
+  const syncedPaths = await syncLoopIsolationArtifacts(sourceRoot, requestedWorktree, {
+    change: options.change ?? null,
+    force: created,
+  });
+  return {
+    ok: true,
+    projectRoot: requestedWorktree,
+    sourceProjectRoot: sourceRoot,
+    created,
+    syncedPaths,
+    git: targetGit,
+  };
+}
+
+function buildCommitPlan(task, statusEntries, baselinePaths = [], options = {}) {
+  const changedPaths = uniquePaths(statusEntries.map((entry) => entry.path))
+    .filter((item) => !matchesPattern(item, LOOP_INTERNAL_STATE_PATTERNS));
+  const baseline = new Set(uniquePaths(baselinePaths).filter((item) => !matchesPattern(item, LOOP_INTERNAL_STATE_PATTERNS)));
+  const writeScope = task?.executionStrategy?.writeScope ?? taskExecutionStrategy(task ?? {}).writeScope ?? [];
+  const taskEventPath = task?.sourcePath
+    ? toPosixPath(path.join(path.dirname(task.sourcePath), 'task-events.jsonl'))
+    : null;
+  const alwaysInclude = new Set(uniquePaths([
+    task?.sourcePath,
+    taskEventPath,
+    ...(options.alwaysIncludePaths ?? []),
+  ]));
+  const touchedPaths = changedPaths.filter((item) => !baseline.has(item));
+  const outOfScopeTouched = touchedPaths.filter((item) => !alwaysInclude.has(item) && !matchesPattern(item, writeScope));
+  if (outOfScopeTouched.length > 0) {
+    return {
+      ok: false,
+      changedPaths,
+      touchedPaths,
+      stagedPaths: [],
+      excludedPaths: changedPaths,
+      outOfScopeTouched,
+      error: `发现超出当前任务 write-scope 的改动: ${outOfScopeTouched.join(', ')}。请先清理、拆分任务，或改用更明确的隔离 worktree。`,
+    };
+  }
+  const candidateSource = touchedPaths.length > 0 ? touchedPaths : changedPaths;
+  const stagedPaths = uniquePaths([
+    ...candidateSource.filter((item) => alwaysInclude.has(item) || writeScope.length === 0 || matchesPattern(item, writeScope)),
+    ...changedPaths.filter((item) => alwaysInclude.has(item)),
+  ]);
+  const excludedPaths = changedPaths.filter((item) => !stagedPaths.includes(item));
+  return {
+    ok: true,
+    changedPaths,
+    touchedPaths,
+    stagedPaths,
+    excludedPaths,
+    outOfScopeTouched: [],
+  };
+}
+
+
+async function gitAddPaths(projectRoot, filePaths) {
+  if (filePaths.length === 0) {
+    return { ok: true, skipped: true };
+  }
+  return runCommand('git', ['add', '--', ...filePaths], { cwd: projectRoot });
+}
+
+async function gitRestorePaths(projectRoot, filePaths) {
+  if (filePaths.length === 0) {
+    return { ok: true, skipped: true };
+  }
+  return runCommand('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...filePaths], {
+    cwd: projectRoot,
+  });
+}
+
+function resolveLoopFolderManualModuleName(workspace) {
+  const sourceRoot = workspace?.sourceProjectRoot ? path.resolve(workspace.sourceProjectRoot) : null;
+  const projectRoot = workspace?.projectRoot ? path.resolve(workspace.projectRoot) : null;
+  if (!sourceRoot || !projectRoot || sourceRoot === projectRoot) {
+    return '';
+  }
+  return normalizeLoopModuleName(path.basename(sourceRoot));
+}
+
+async function cleanupLoopOperationalArtifacts(projectRoot) {
+  const status = await gitStatusEntries(projectRoot);
+  if (!status.ok) {
+    return {
+      ok: false,
+      restoredPaths: [],
+      removedPaths: [],
+      error: trimOutput(status.status?.stderr || status.status?.stdout) || '无法读取 Git 状态。',
+    };
+  }
+  const candidates = status.entries.filter((entry) => matchesPattern(entry.path, LOOP_OPERATIONAL_ARTIFACT_PATTERNS));
+  const restoredPaths = uniquePaths(candidates.filter((entry) => entry.status !== '??').map((entry) => entry.path));
+  const removedPaths = uniquePaths(candidates.filter((entry) => entry.status === '??').map((entry) => entry.path));
+  const restore = await gitRestorePaths(projectRoot, restoredPaths);
+  if (!restore.ok) {
+    return {
+      ok: false,
+      restoredPaths: [],
+      removedPaths: [],
+      error: trimOutput(restore.stderr || restore.stdout) || '无法回滚 loop 运行态产物。',
+    };
+  }
+  for (const relativePath of removedPaths) {
+    await fs.rm(harnessPath(projectRoot, relativePath), { recursive: true, force: true });
+  }
+  return {
+    ok: true,
+    restoredPaths,
+    removedPaths,
+  };
 }
 
 function renderProgressEntry(title, lines) {
@@ -515,28 +898,140 @@ async function runCommand(command, args, options = {}) {
   });
 }
 
-async function gitCommit(projectRoot, message) {
-  const status = await runCommand('git', ['status', '--porcelain'], { cwd: projectRoot });
+async function planGitCommit(projectRoot, options = {}) {
+  const git = options.git ?? await inspectGitWorkspace(projectRoot);
+  const status = await gitStatusEntries(projectRoot);
+  const branch = git?.ok ? (git.branch ?? null) : null;
+  const worktreePath = git?.ok ? (git.worktreePath ?? path.resolve(projectRoot)) : path.resolve(projectRoot);
   if (!status.ok) {
-    return { ok: false, skipped: false, message: 'git status 执行失败', status };
+    return {
+      ok: false,
+      skipped: false,
+      message: 'git status 执行失败',
+      status: status.status,
+      git: git?.ok ? git : null,
+      branch,
+      worktreePath,
+    };
   }
-  if (!status.stdout.trim()) {
-    return { ok: true, skipped: true, message: '没有需要提交的 Git 变更。' };
+  if (status.entries.length === 0) {
+    return {
+      ok: true,
+      skipped: true,
+      message: '没有需要提交的 Git 变更。',
+      git: git?.ok ? git : null,
+      branch,
+      worktreePath,
+      commitPlan: {
+        ok: true,
+        changedPaths: [],
+        touchedPaths: [],
+        stagedPaths: [],
+        excludedPaths: [],
+        outOfScopeTouched: [],
+      },
+    };
   }
-  const add = await runCommand('git', ['add', '-A'], { cwd: projectRoot });
-  if (!add.ok) {
-    return { ok: false, skipped: false, message: 'git add 执行失败', add };
+  if (!git?.ok) {
+    return {
+      ok: false,
+      skipped: false,
+      message: '当前目录不是 Git 工作区，无法自动提交。',
+      status: status.status,
+      git: null,
+      branch,
+      worktreePath,
+    };
   }
-  const commit = await runCommand('git', ['commit', '-m', message], { cwd: projectRoot });
-  if (!commit.ok) {
-    return { ok: false, skipped: false, message: 'git commit 执行失败', commit };
+  if (git.detachedHead) {
+    return {
+      ok: false,
+      skipped: false,
+      message: '当前 worktree 处于 detached HEAD，不能为 loop 任务自动提交。请先切到命名分支后重试。',
+      git,
+      branch: null,
+      worktreePath,
+    };
   }
-  const rev = await runCommand('git', ['rev-parse', '--short', 'HEAD'], { cwd: projectRoot });
+  const commitPlan = buildCommitPlan(options.task ?? null, status.entries, options.baselinePaths ?? [], {
+    alwaysIncludePaths: options.alwaysIncludePaths ?? [],
+  });
+  if (!commitPlan.ok) {
+    return {
+      ok: false,
+      skipped: false,
+      message: commitPlan.error,
+      git,
+      branch,
+      worktreePath,
+      commitPlan,
+    };
+  }
+  if (git.isMainWorktree && !options.allowDirtyMain && commitPlan.excludedPaths.length > 0) {
+    return {
+      ok: false,
+      skipped: false,
+      message: `当前主工作区还有未纳入本任务提交的改动: ${commitPlan.excludedPaths.join(', ')}。请改用 --worktree/--branch，或确认后显式传入 --allow-dirty-main。`,
+      git,
+      branch,
+      worktreePath,
+      commitPlan,
+    };
+  }
+  if (commitPlan.stagedPaths.length === 0) {
+    return {
+      ok: true,
+      skipped: true,
+      message: '没有属于当前任务的可提交变更。',
+      git,
+      branch,
+      worktreePath,
+      commitPlan,
+    };
+  }
   return {
     ok: true,
     skipped: false,
+    message: 'ready',
+    git,
+    branch,
+    worktreePath,
+    commitPlan,
+  };
+}
+
+async function gitCommit(projectRoot, message, options = {}) {
+  const prepared = options.prepared ?? await planGitCommit(projectRoot, options);
+  if (!prepared.ok || prepared.skipped) {
+    return prepared;
+  }
+  const add = await gitAddPaths(projectRoot, prepared.commitPlan.stagedPaths);
+  if (!add.ok) {
+    return {
+      ...prepared,
+      ok: false,
+      skipped: false,
+      message: 'git add 执行失败',
+      add,
+    };
+  }
+  const commit = await runCommand('git', ['commit', '-m', message, '--', ...prepared.commitPlan.stagedPaths], { cwd: projectRoot });
+  if (!commit.ok) {
+    return {
+      ...prepared,
+      ok: false,
+      skipped: false,
+      message: 'git commit 执行失败',
+      commit,
+    };
+  }
+  const rev = await runCommand('git', ['rev-parse', '--short', 'HEAD'], { cwd: projectRoot });
+  return {
+    ...prepared,
+    ok: true,
+    skipped: false,
     message: '已提交',
-    sha: rev.stdout.trim() || null,
+    sha: rev.ok ? (rev.stdout.trim() || null) : null,
     commit,
   };
 }
@@ -669,6 +1164,18 @@ async function updateReleaseLedgerAfterFinish(projectRoot, task, commitSha = nul
   ledger = appended.ledger;
 
   let tag = null;
+  if (!commitSha && !current.tag?.name) {
+    const tagged = updateReleaseTag(ledger, {
+      version: current.version,
+      name: current.version,
+      localSha: null,
+      remoteSha: null,
+      remoteStatus: null,
+      warning: null,
+      updatedAt: timestamp(),
+    });
+    ledger = tagged.ledger;
+  }
   if (commitSha) {
     tag = await syncLocalVersionTag(projectRoot, current.version, commitSha);
     const tagged = updateReleaseTag(ledger, {
@@ -742,12 +1249,14 @@ function parseEvidenceArtifacts(projectRoot, evidenceText) {
   return { screenshots, textualEvidence };
 }
 
-async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
+async function writeTestReport(projectRoot, { task, agent, advanced, change, workspace = null, commit = null }) {
   const relativePath = cjoin(LOOP_TEST_REPORTS_DIR, reportFileName(task.id));
-  const htmlRelativePath = cjoin(LOOP_TEST_REPORTS_DIR, `${task.id.replace(/[^a-zA-Z0-9._-]/g, '_')}.html`);
   const evidenceText = advanced.evidence ?? inferUiVerificationHint(task, agent);
   const notesText = advanced.notes ?? '无';
   const evidenceArtifacts = parseEvidenceArtifacts(projectRoot, evidenceText);
+  const worktreePath = workspace?.path ?? path.resolve(projectRoot);
+  const branch = workspace?.branch ?? null;
+  const commitSha = commit?.sha ?? null;
   const report = {
     version: 1,
     generatedAt: timestamp(),
@@ -755,6 +1264,9 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
     verifyCommand: advanced.verification?.command ?? task.verify ?? '未指定',
     oracle: task.oracle ?? null,
     testStrategy: task.testStrategy ?? taskTestStrategy(task),
+    worktreePath,
+    branch,
+    commitSha,
     summary: {
       total: 1,
       passed: advanced.verification?.ok ? 1 : 0,
@@ -780,6 +1292,9 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
     '',
     `- 测试时间: ${timestamp()}`,
     `- 变更: ${task.changeId}`,
+    `- 工作区: ${worktreePath}`,
+    `- 分支: ${branch ?? '未命名分支或 detached HEAD'}`,
+    `- 提交: ${commitSha ?? '未提交'}`,
     `- 完成条件: ${task.done ?? '未指定'}`,
     `- 自测命令: ${advanced.verification?.command ?? task.verify ?? '未指定'}`,
     `- 测试策略: ${task.testStrategyDescription ?? describeTestStrategy(task.testStrategy ?? taskTestStrategy(task))}`,
@@ -787,7 +1302,7 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
     `- 自测结果: ${advanced.verification?.ok ? '通过' : '失败或未运行'}`,
     `- Change 校验: ${change.ok ? '通过' : '失败'}`,
     `- EVO 冒烟证据: ${advanced.verification?.ok ? 'smoke pass via task verify command' : 'smoke failed or missing'}`,
-    `- EVO 功能覆盖证据: feature coverage checked against OpenPrd task completion`,
+    '- EVO 功能覆盖证据: feature coverage checked against OpenPrd task completion',
     `- 界面验证策略: ${inferUiVerificationHint(task, agent)}`,
     `- 补充证据: ${evidenceText}`,
     `- 备注: ${notesText}`,
@@ -825,7 +1340,7 @@ async function writeTestReport(projectRoot, { task, agent, advanced, change }) {
   await writeHtmlArtifact(htmlPath, renderRegressionArtifact({ task, report }));
   return {
     markdownPath: relativePath,
-    htmlPath: htmlRelativePath,
+    htmlPath: path.relative(projectRoot, htmlPath),
     report,
   };
 }
@@ -965,18 +1480,36 @@ export async function nextLoopWorkspace(projectRoot, options = {}) {
 }
 
 export async function promptLoopWorkspace(projectRoot, options = {}) {
-  await ensureLoopFiles(projectRoot);
+  const workspace = await resolveLoopWorkspace(projectRoot, options);
+  if (!workspace.ok) {
+    return {
+      ok: false,
+      action: 'loop-prompt',
+      projectRoot: path.resolve(projectRoot),
+      agent: options.agent ?? 'codex',
+      errors: workspace.errors,
+    };
+  }
+  const effectiveRoot = workspace.projectRoot;
   const agent = normalizeAgent(options.agent ?? 'codex');
-  const featureList = await readFeatureList(projectRoot);
+  const featureList = await readFeatureList(effectiveRoot);
   if (!featureList) {
     throw new Error('Loop feature list is missing. Run openprd loop . --plan --change <id>.');
   }
   const { task, dependencyState: state } = nextLoopTask(featureList, options.item);
+  const workspaceInfo = {
+    path: workspace.git?.worktreePath ?? path.resolve(effectiveRoot),
+    branch: workspace.git?.branch ?? null,
+    created: workspace.created,
+    syncedPaths: workspace.syncedPaths,
+  };
   if (!task) {
     return {
       ok: false,
       action: 'loop-prompt',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       agent,
       errors: ['当前没有可执行的 loop 任务。'],
     };
@@ -985,7 +1518,9 @@ export async function promptLoopWorkspace(projectRoot, options = {}) {
     return {
       ok: false,
       action: 'loop-prompt',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       agent,
       task,
       dependencyState: state,
@@ -994,58 +1529,111 @@ export async function promptLoopWorkspace(projectRoot, options = {}) {
   }
   const prompt = renderLoopPrompt({
     agent,
-    projectRoot,
+    projectRoot: effectiveRoot,
     featureList,
     task,
     dependency: state,
     mode: options.mode ?? 'manual',
   });
   const promptFileName = `${task.id.replace(/[^a-zA-Z0-9._-]/g, '_')}-${agent}-${Date.now()}.md`;
-  const promptPath = harnessPath(projectRoot, cjoin(LOOP_PROMPTS_DIR, promptFileName));
+  const promptPath = harnessPath(effectiveRoot, cjoin(LOOP_PROMPTS_DIR, promptFileName));
   await writeText(promptPath, prompt);
-  const invocation = defaultAgentInvocation(agent, projectRoot, path.relative(projectRoot, promptPath));
+  const invocation = defaultAgentInvocation(agent, effectiveRoot, path.relative(effectiveRoot, promptPath));
+  const baselineStatus = await gitStatusEntries(effectiveRoot);
+  const baselinePaths = baselineStatus.ok
+    ? uniquePaths(baselineStatus.entries.map((entry) => entry.path))
+      .filter((item) => !matchesPattern(item, LOOP_INTERNAL_STATE_PATTERNS))
+    : [];
+  await updateLoopState(effectiveRoot, {
+    currentTaskId: task.id,
+    currentTaskHandle: task.taskHandle,
+    currentTaskTitle: task.title,
+    currentTaskBaselinePaths: baselinePaths,
+    currentWorktreePath: workspaceInfo.path,
+    currentBranch: workspaceInfo.branch,
+    lastWorktreePath: workspaceInfo.path,
+    lastBranch: workspaceInfo.branch,
+  });
   return {
     ok: true,
     action: 'loop-prompt',
-    projectRoot,
+    projectRoot: effectiveRoot,
+    sourceProjectRoot: workspace.sourceProjectRoot,
+    workspace: workspaceInfo,
     agent,
     task,
     dependencyState: state,
     prompt,
-    promptPath: path.relative(projectRoot, promptPath),
+    promptPath: path.relative(effectiveRoot, promptPath),
     invocation,
   };
 }
 
 export async function verifyLoopWorkspace(projectRoot, options = {}) {
-  await ensureLoopFiles(projectRoot);
-  const featureList = await readFeatureList(projectRoot);
+  const workspace = await resolveLoopWorkspace(projectRoot, options);
+  if (!workspace.ok) {
+    return {
+      ok: false,
+      action: 'loop-verify',
+      projectRoot: path.resolve(projectRoot),
+      errors: workspace.errors,
+    };
+  }
+  const effectiveRoot = workspace.projectRoot;
+  const featureList = await readFeatureList(effectiveRoot);
   if (!featureList) {
     throw new Error('Loop feature list is missing. Run openprd loop . --plan --change <id>.');
   }
   const { task, dependencyState: state } = nextLoopTask(featureList, options.item);
+  const workspaceInfo = {
+    path: workspace.git?.worktreePath ?? path.resolve(effectiveRoot),
+    branch: workspace.git?.branch ?? null,
+    created: workspace.created,
+    syncedPaths: workspace.syncedPaths,
+  };
   if (!task) {
     const summary = buildLoopSummary(featureList);
     if (summary.total > 0 && summary.done === summary.total) {
       return {
         ok: true,
         action: 'loop-verify',
-        projectRoot,
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: workspace.sourceProjectRoot,
+        workspace: workspaceInfo,
         summary,
         errors: [],
         checks: ['所有 OpenPrd loop 任务均已完成。'],
       };
     }
-    return { ok: false, action: 'loop-verify', projectRoot, summary, errors: ['当前没有可执行的 loop 任务。'] };
+    return {
+      ok: false,
+      action: 'loop-verify',
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
+      summary,
+      errors: ['当前没有可执行的 loop 任务。'],
+    };
   }
   if (!state.ready) {
-    return { ok: false, action: 'loop-verify', projectRoot, task, dependencyState: state, errors: [`任务 ${task.id} 尚未就绪。`] };
+    return {
+      ok: false,
+      action: 'loop-verify',
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
+      task,
+      dependencyState: state,
+      errors: [`任务 ${task.id} 尚未就绪。`],
+    };
   }
-  const verify = await verifyOpenSpecTaskWorkspace(projectRoot, { change: task.changeId, item: task.sourceTaskId });
+  const verify = await verifyOpenSpecTaskWorkspace(effectiveRoot, { change: task.changeId, item: task.sourceTaskId });
   return {
     ok: verify.ok,
     action: 'loop-verify',
-    projectRoot,
+    projectRoot: effectiveRoot,
+    sourceProjectRoot: workspace.sourceProjectRoot,
+    workspace: workspaceInfo,
     task,
     dependencyState: state,
     verify,
@@ -1064,32 +1652,57 @@ function updateTask(featureList, taskId, patch) {
 }
 
 export async function finishLoopWorkspace(projectRoot, options = {}) {
-  await ensureLoopFiles(projectRoot);
-  const featureList = await readFeatureList(projectRoot);
+  const workspace = await resolveLoopWorkspace(projectRoot, options);
+  if (!workspace.ok) {
+    return {
+      ok: false,
+      action: 'loop-finish',
+      projectRoot: path.resolve(projectRoot),
+      errors: workspace.errors,
+    };
+  }
+  const effectiveRoot = workspace.projectRoot;
+  const featureList = await readFeatureList(effectiveRoot);
   if (!featureList) {
     throw new Error('Loop feature list is missing. Run openprd loop . --plan --change <id>.');
   }
   const { task, dependencyState: state } = nextLoopTask(featureList, options.item);
+  const workspaceInfo = {
+    path: workspace.git?.worktreePath ?? path.resolve(effectiveRoot),
+    branch: workspace.git?.branch ?? null,
+    created: workspace.created,
+    syncedPaths: workspace.syncedPaths,
+  };
   if (!task) {
-    return { ok: false, action: 'loop-finish', projectRoot, errors: ['当前没有可执行的 loop 任务。'] };
+    return { ok: false, action: 'loop-finish', projectRoot: effectiveRoot, sourceProjectRoot: workspace.sourceProjectRoot, workspace: workspaceInfo, errors: ['当前没有可执行的 loop 任务。'] };
   }
   if (!state.ready) {
-    return { ok: false, action: 'loop-finish', projectRoot, task, dependencyState: state, errors: [`任务 ${task.id} 尚未就绪。`] };
+    return { ok: false, action: 'loop-finish', projectRoot: effectiveRoot, sourceProjectRoot: workspace.sourceProjectRoot, workspace: workspaceInfo, task, dependencyState: state, errors: [`任务 ${task.id} 尚未就绪。`] };
   }
 
-  const beforeChange = await validateOpenSpecChangeWorkspace(projectRoot, { change: task.changeId });
+  const loopState = await readLoopState(effectiveRoot);
+  const baselinePaths = loopState?.currentTaskId === task.id
+    ? uniquePaths(loopState.currentTaskBaselinePaths ?? [])
+    : [];
+
+  const beforeChange = await validateOpenSpecChangeWorkspace(effectiveRoot, {
+    change: task.changeId,
+    folderManualModuleName: resolveLoopFolderManualModuleName(workspace),
+  });
   if (!beforeChange.ok) {
     return {
       ok: false,
       action: 'loop-finish',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       task,
       change: beforeChange,
       errors: beforeChange.errors,
     };
   }
 
-  const verification = await verifyOpenSpecTaskWorkspace(projectRoot, {
+  const verification = await verifyOpenSpecTaskWorkspace(effectiveRoot, {
     change: task.changeId,
     item: task.sourceTaskId,
     evidence: options.evidence,
@@ -1098,8 +1711,8 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
   if (!verification.ok) {
     const failureReason = verification.verification?.stderr || verification.verification?.stdout || '自测失败';
     const failedList = updateTask(featureList, task.id, { status: 'failed', lastError: failureReason });
-    await writeFeatureList(projectRoot, failedList);
-    await appendFailedApproach(projectRoot, {
+    await writeFeatureList(effectiveRoot, failedList);
+    await appendFailedApproach(effectiveRoot, {
       task,
       stage: 'task-verify',
       reason: failureReason,
@@ -1110,7 +1723,9 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     return {
       ok: false,
       action: 'loop-finish',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       task,
       verification,
       errors: [failureReason || `任务 ${task.id} 自测失败。`],
@@ -1120,8 +1735,8 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
   const finishEvidence = validateLoopFinishEvidence(task, options);
   if (!finishEvidence.ok) {
     const failedList = updateTask(featureList, task.id, { status: 'failed', lastError: finishEvidence.error });
-    await writeFeatureList(projectRoot, failedList);
-    await appendFailedApproach(projectRoot, {
+    await writeFeatureList(effectiveRoot, failedList);
+    await appendFailedApproach(effectiveRoot, {
       task,
       stage: 'finish-evidence',
       reason: finishEvidence.error,
@@ -1132,14 +1747,16 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     return {
       ok: false,
       action: 'loop-finish',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       task,
       verification,
       errors: [finishEvidence.error],
     };
   }
 
-  const advanced = await advanceOpenSpecTaskWorkspace(projectRoot, {
+  const advanced = await advanceOpenSpecTaskWorkspace(effectiveRoot, {
     change: task.changeId,
     item: task.sourceTaskId,
     verify: false,
@@ -1149,8 +1766,8 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
   if (!advanced.ok) {
     const failureReason = advanced.errors?.[0] ?? `任务 ${task.id} 标记完成失败。`;
     const failedList = updateTask(featureList, task.id, { status: 'failed', lastError: failureReason });
-    await writeFeatureList(projectRoot, failedList);
-    await appendFailedApproach(projectRoot, {
+    await writeFeatureList(effectiveRoot, failedList);
+    await appendFailedApproach(effectiveRoot, {
       task,
       stage: 'task-advance',
       reason: failureReason,
@@ -1161,7 +1778,9 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     return {
       ok: false,
       action: 'loop-finish',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: workspace.sourceProjectRoot,
+      workspace: workspaceInfo,
       task,
       verification,
       advanced,
@@ -1175,7 +1794,73 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
   };
 
   let commit = null;
-  const testReport = await writeTestReport(projectRoot, {
+  let projectRelease = null;
+  let pendingRelease = null;
+  if (options.commit) {
+    const preparedCommit = await planGitCommit(effectiveRoot, {
+      task,
+      baselinePaths,
+      allowDirtyMain: Boolean(options.allowDirtyMain),
+      git: workspace.git,
+    });
+    if (!preparedCommit.ok) {
+      return {
+        ok: false,
+        action: 'loop-finish',
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: workspace.sourceProjectRoot,
+        workspace: workspaceInfo,
+        task,
+        advanced: finishResult,
+        change,
+        commit: preparedCommit,
+        errors: [preparedCommit.message],
+      };
+    }
+    if (!preparedCommit.skipped) {
+      pendingRelease = await updateReleaseLedgerAfterFinish(effectiveRoot, task, null).catch((error) => ({
+        skipped: true,
+        warnings: [error instanceof Error ? error.message : String(error)],
+        tag: null,
+        version: null,
+      }));
+    }
+    const alwaysIncludePaths = pendingRelease?.version && !pendingRelease.skipped
+      ? [RELEASE_LEDGER]
+      : [];
+    commit = await gitCommit(effectiveRoot, options.message ?? task.commitMessage, {
+      task,
+      baselinePaths,
+      allowDirtyMain: Boolean(options.allowDirtyMain),
+      git: preparedCommit.git ?? workspace.git,
+      alwaysIncludePaths,
+    });
+    if (!commit.ok) {
+      return {
+        ok: false,
+        action: 'loop-finish',
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: workspace.sourceProjectRoot,
+        workspace: workspaceInfo,
+        task,
+        advanced: finishResult,
+        change,
+        commit,
+        errors: [commit.message],
+      };
+    }
+    projectRelease = pendingRelease;
+    if (projectRelease?.version && !projectRelease.skipped && !commit.skipped) {
+      const tag = await syncLocalVersionTag(effectiveRoot, projectRelease.version, commit.sha);
+      projectRelease = {
+        ...projectRelease,
+        tag,
+        warnings: [...(projectRelease.warnings ?? []), ...(tag?.warning ? [tag.warning] : [])],
+      };
+    }
+  }
+
+  const testReport = await writeTestReport(effectiveRoot, {
     task,
     agent: options.agent ?? 'codex',
     advanced: {
@@ -1184,32 +1869,12 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
       notes: options.notes ?? null,
     },
     change,
+    workspace: {
+      path: commit?.worktreePath ?? workspaceInfo.path,
+      branch: commit?.branch ?? workspaceInfo.branch,
+    },
+    commit,
   });
-  if (options.commit) {
-    commit = await gitCommit(projectRoot, options.message ?? task.commitMessage);
-    if (!commit.ok) {
-      return {
-        ok: false,
-        action: 'loop-finish',
-        projectRoot,
-        task,
-        advanced: finishResult,
-        change,
-        commit,
-        errors: [commit.message],
-      };
-    }
-  }
-
-  const projectRelease = await updateReleaseLedgerAfterFinish(
-    projectRoot,
-    task,
-    commit && !commit.skipped ? commit.sha : null,
-  ).catch((error) => ({
-    skipped: true,
-    warnings: [error instanceof Error ? error.message : String(error)],
-    tag: null,
-  }));
 
   const updatedList = updateTask(featureList, task.id, {
     status: 'done',
@@ -1221,7 +1886,7 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
   const nextAfterFinish = nextLoopTask(updatedList).task;
   let quality = null;
   if (!nextAfterFinish) {
-    quality = await verifyQualityWorkspace(projectRoot, { strict: true }).catch((error) => ({
+    quality = await verifyQualityWorkspace(effectiveRoot, { strict: true }).catch((error) => ({
       ok: false,
       action: 'quality-verify',
       errors: [error instanceof Error ? error.message : String(error)],
@@ -1232,15 +1897,15 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
       const qualityError = [
         'Final EVO quality gate is not production-ready.',
         attentionGates.length > 0 ? `Attention gates: ${attentionGates.join(', ')}` : null,
-        quality.htmlPath ? `HTML report: ${path.relative(projectRoot, quality.htmlPath)}` : null,
+        quality.htmlPath ? `HTML report: ${path.relative(effectiveRoot, quality.htmlPath)}` : null,
       ].filter(Boolean).join(' ');
       const failedList = updateTask(featureList, task.id, {
         status: 'failed',
         lastError: qualityError,
         lastTestReport: testReport.markdownPath,
       });
-      await writeFeatureList(projectRoot, failedList);
-      await appendFailedApproach(projectRoot, {
+      await writeFeatureList(effectiveRoot, failedList);
+      await appendFailedApproach(effectiveRoot, {
         task,
         stage: 'final-quality',
         reason: qualityError,
@@ -1248,10 +1913,20 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
         notes: options.notes ?? null,
         evidence: options.evidence ?? null,
       });
+      const operationalCleanup = options.commit
+        ? await cleanupLoopOperationalArtifacts(effectiveRoot).catch((error) => ({
+          ok: false,
+          restoredPaths: [],
+          removedPaths: [],
+          error: error instanceof Error ? error.message : String(error),
+        }))
+        : null;
       return {
         ok: false,
         action: 'loop-finish',
-        projectRoot,
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: workspace.sourceProjectRoot,
+        workspace: workspaceInfo,
         task,
         advanced: finishResult,
         change,
@@ -1259,14 +1934,15 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
         testReport: testReport.markdownPath,
         regressionHtml: testReport.htmlPath,
         quality,
+        operationalCleanup,
         errors: [qualityError, ...(quality.errors ?? [])],
       };
     }
   }
-  await writeFeatureList(projectRoot, updatedList);
+  await writeFeatureList(effectiveRoot, updatedList);
   let learningReview = null;
   try {
-    learningReview = await generateLearningReviewWorkspace(projectRoot, {
+    learningReview = await generateLearningReviewWorkspace(effectiveRoot, {
       trigger: 'loop-finish',
       topic: `${task.id} ${task.title}`,
       sourceScope: 'loop',
@@ -1292,8 +1968,8 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
       ? [
         `复盘学习包: ${learningReview.packageId}。`,
         `复盘写作状态: ${learningReview.packageMeta?.authoringStatus ?? 'unknown'}。`,
-        `学习阅读器: ${path.relative(projectRoot, learningReview.packagePaths.readerHtml)}。`,
-        ...(learningReview.packagePaths?.agentPrompt ? [`Agent 写作提示: ${path.relative(projectRoot, learningReview.packagePaths.agentPrompt)}。`] : []),
+        `学习阅读器: ${path.relative(effectiveRoot, learningReview.packagePaths.readerHtml)}。`,
+        ...(learningReview.packagePaths?.agentPrompt ? [`Agent 写作提示: ${path.relative(effectiveRoot, learningReview.packagePaths.agentPrompt)}。`] : []),
       ]
       : [`复盘学习: 生成失败 (${learningReview?.errors?.[0] ?? 'unknown'})。`];
   const knowledgeSignal = {
@@ -1303,11 +1979,11 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     attentionGates: quality?.report?.readiness?.attentionGates ?? [],
     summary: `loop finish ${task.id}: ${task.title}`,
   };
-  await recordKnowledgeReviewSignal(projectRoot, knowledgeSignal).catch(() => null);
-  const knowledgeReviewSource = (await exists(cjoin(projectRoot, OPENPRD_HARNESS_TURN_STATE)))
+  await recordKnowledgeReviewSignal(effectiveRoot, knowledgeSignal).catch(() => null);
+  const knowledgeReviewSource = (await exists(cjoin(effectiveRoot, OPENPRD_HARNESS_TURN_STATE)))
     ? OPENPRD_HARNESS_TURN_STATE
     : (quality?.reportPath ?? null);
-  const knowledgeReview = await reviewKnowledgeWorkspace(projectRoot, {
+  const knowledgeReview = await reviewKnowledgeWorkspace(effectiveRoot, {
     from: knowledgeReviewSource,
     signal: knowledgeSignal,
   }).catch((error) => ({
@@ -1316,26 +1992,28 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     skipped: false,
     errors: [error instanceof Error ? error.message : String(error)],
   }));
-  await appendText(harnessPath(projectRoot, LOOP_PROGRESS), renderProgressEntry(timestamp(), [
+  await appendText(harnessPath(effectiveRoot, LOOP_PROGRESS), renderProgressEntry(timestamp(), [
     `已完成 ${task.id}: ${task.title}。`,
     `自测: ${finishResult.verification?.ok ? '通过' : '未运行'}。`,
     task.oracle ? `对照基准: ${task.oracle}。` : null,
+    `工作区: ${workspaceInfo.path}。`,
+    `分支: ${commit?.branch ?? workspaceInfo.branch ?? '未命名分支或 detached HEAD'}。`,
     `测试报告: ${testReport.markdownPath}。`,
     `HTML 回归报告: ${testReport.htmlPath}。`,
     ...(quality ? [
       `最终 EVO: ${quality.report?.readiness?.productionReady ? 'production-ready' : 'needs-attention'}。`,
-      ...(quality.htmlPath ? [`EVO 报告: ${path.relative(projectRoot, quality.htmlPath)}。`] : []),
+      ...(quality.htmlPath ? [`EVO 报告: ${path.relative(effectiveRoot, quality.htmlPath)}。`] : []),
     ] : []),
     ...learningProgress,
     knowledgeReview?.skipped
       ? null
-      : `项目经验草案: ${path.relative(projectRoot, knowledgeReview.files?.draftSkill ?? knowledgeReview.files?.candidateDir ?? '') || '已生成'}。`,
+      : `项目经验草案: ${path.relative(effectiveRoot, knowledgeReview.files?.draftSkill ?? knowledgeReview.files?.candidateDir ?? '') || '已生成'}。`,
     commit ? `Commit: ${commit.skipped ? '跳过' : commit.sha}` : 'Commit: 未请求。',
     projectRelease?.version ? `项目版本: ${projectRelease.version}。` : null,
     projectRelease?.tag?.tagName ? `版本 tag: ${projectRelease.tag.tagName}${projectRelease.tag.localSha ? ` -> ${projectRelease.tag.localSha}` : ''}。` : null,
     ...(projectRelease?.warnings ?? []).map((warning) => `版本轨道: ${warning}`),
   ]));
-  await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
+  await appendJsonl(harnessPath(effectiveRoot, LOOP_SESSIONS), {
     version: 1,
     at: timestamp(),
     action: 'finish',
@@ -1345,7 +2023,18 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     changeId: task.changeId,
     ok: true,
     oracle: task.oracle ?? null,
-    commit: commit ? { ok: commit.ok, skipped: commit.skipped, sha: commit.sha ?? null } : null,
+    worktreePath: commit?.worktreePath ?? workspaceInfo.path,
+    branch: commit?.branch ?? workspaceInfo.branch,
+    commitSha: commit?.sha ?? null,
+    commit: commit ? {
+      ok: commit.ok,
+      skipped: commit.skipped,
+      sha: commit.sha ?? null,
+      branch: commit.branch ?? null,
+      worktreePath: commit.worktreePath ?? null,
+      stagedPaths: commit.commitPlan?.stagedPaths ?? [],
+      excludedPaths: commit.commitPlan?.excludedPaths ?? [],
+    } : null,
     projectRelease: projectRelease ?? null,
     testReport: testReport.markdownPath,
     regressionHtml: testReport.htmlPath,
@@ -1386,16 +2075,35 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
         errors: learningReview?.errors ?? [],
       },
   });
-  await updateLoopState(projectRoot, {
+  await updateLoopState(effectiveRoot, {
     currentTaskId: nextAfterFinish?.id ?? null,
     currentTaskHandle: nextAfterFinish?.taskHandle ?? null,
     currentTaskTitle: nextAfterFinish?.title ?? null,
+    currentTaskBaselinePaths: [],
+    currentWorktreePath: commit?.worktreePath ?? workspaceInfo.path,
+    currentBranch: commit?.branch ?? workspaceInfo.branch,
+    lastWorktreePath: commit?.worktreePath ?? workspaceInfo.path,
+    lastBranch: commit?.branch ?? workspaceInfo.branch,
+    lastCommitSha: commit?.sha ?? null,
     completedTaskIds: updatedList.tasks.filter((item) => item.status === 'done').map((item) => item.id),
   });
+  const operationalCleanup = options.commit
+    ? await cleanupLoopOperationalArtifacts(effectiveRoot).catch((error) => ({
+      ok: false,
+      restoredPaths: [],
+      removedPaths: [],
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    : null;
   return {
     ok: true,
     action: 'loop-finish',
-    projectRoot,
+    projectRoot: effectiveRoot,
+    sourceProjectRoot: workspace.sourceProjectRoot,
+    workspace: {
+      ...workspaceInfo,
+      branch: commit?.branch ?? workspaceInfo.branch,
+    },
     task,
     advanced,
     change,
@@ -1404,6 +2112,7 @@ export async function finishLoopWorkspace(projectRoot, options = {}) {
     testReport: testReport.markdownPath,
     regressionHtml: testReport.htmlPath,
     quality,
+    operationalCleanup,
     knowledgeReview,
     learningReview,
     summary: buildLoopSummary(updatedList),
@@ -1416,7 +2125,8 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
   const promptResult = await promptLoopWorkspace(projectRoot, { ...options, agent, mode: 'loop-run' });
   if (!promptResult.ok) return promptResult;
 
-  const absolutePromptPath = harnessPath(projectRoot, promptResult.promptPath);
+  const effectiveRoot = promptResult.projectRoot;
+  const absolutePromptPath = harnessPath(effectiveRoot, promptResult.promptPath);
   const prompt = await readText(absolutePromptPath);
   const invocation = options.agentCommand
     ? {
@@ -1426,10 +2136,10 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
       display: `${options.agentCommand} < ${shellJoin([promptResult.promptPath])}`,
       shell: true,
     }
-    : defaultAgentInvocation(agent, projectRoot, promptResult.promptPath);
+    : defaultAgentInvocation(agent, effectiveRoot, promptResult.promptPath);
   const codexPreflight = agent === 'codex' && !options.agentCommand && !options.dryRun
     ? await ensureCodexCliReady({
-      cwd: projectRoot,
+      cwd: effectiveRoot,
       repair: Boolean(options.repairAgent),
       runCommand: options.codexRunCommand,
       packageManager: options.packageManager,
@@ -1437,7 +2147,7 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     : null;
 
   if (codexPreflight && !codexPreflight.ok) {
-    await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
+    await appendJsonl(harnessPath(effectiveRoot, LOOP_SESSIONS), {
       version: 1,
       at: timestamp(),
       action: codexPreflight.repairAttempted ? 'agent-preflight-repair-failed' : 'agent-preflight-failed',
@@ -1446,6 +2156,8 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
       taskHandle: promptResult.task.taskHandle,
       taskTitle: promptResult.task.title,
       ok: false,
+      worktreePath: promptResult.workspace?.path ?? effectiveRoot,
+      branch: promptResult.workspace?.branch ?? null,
       preflight: {
         ok: codexPreflight.preflight.ok,
         diagnosticType: codexPreflight.preflight.diagnostic?.type ?? null,
@@ -1456,7 +2168,9 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     return {
       ok: false,
       action: 'loop-run',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: promptResult.sourceProjectRoot,
+      workspace: promptResult.workspace,
       agent,
       task: promptResult.task,
       promptPath: promptResult.promptPath,
@@ -1480,17 +2194,24 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     changeId: promptResult.task.changeId,
     promptPath: promptResult.promptPath,
     invocation: invocation.display,
+    worktreePath: promptResult.workspace?.path ?? effectiveRoot,
+    branch: promptResult.workspace?.branch ?? null,
+    createdWorktree: Boolean(promptResult.workspace?.created),
     preflight: codexPreflight ? {
       ok: codexPreflight.preflight.ok,
       command: codexPreflight.preflight.command.display,
       repairAttempted: codexPreflight.repairAttempted,
     } : null,
   };
-  await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), sessionEvent);
-  await updateLoopState(projectRoot, {
+  await appendJsonl(harnessPath(effectiveRoot, LOOP_SESSIONS), sessionEvent);
+  await updateLoopState(effectiveRoot, {
     currentTaskId: promptResult.task.id,
     currentTaskHandle: promptResult.task.taskHandle,
     currentTaskTitle: promptResult.task.title,
+    currentWorktreePath: promptResult.workspace?.path ?? effectiveRoot,
+    currentBranch: promptResult.workspace?.branch ?? null,
+    lastWorktreePath: promptResult.workspace?.path ?? effectiveRoot,
+    lastBranch: promptResult.workspace?.branch ?? null,
     lastAgent: agent,
     lastSessionAt: sessionEvent.at,
   });
@@ -1500,7 +2221,9 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
       ok: true,
       action: 'loop-run',
       dryRun: true,
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: promptResult.sourceProjectRoot,
+      workspace: promptResult.workspace,
       agent,
       task: promptResult.task,
       promptPath: promptResult.promptPath,
@@ -1513,9 +2236,9 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
 
   const runAgentCommand = options.agentRunCommand ?? runCommand;
   const run = invocation.shell
-    ? await runAgentCommand(invocation.command, [], { cwd: projectRoot, shell: true, stdin: prompt })
-    : await runAgentCommand(invocation.command, invocation.args, { cwd: projectRoot, stdin: prompt });
-  await appendJsonl(harnessPath(projectRoot, LOOP_SESSIONS), {
+    ? await runAgentCommand(invocation.command, [], { cwd: effectiveRoot, shell: true, stdin: prompt })
+    : await runAgentCommand(invocation.command, invocation.args, { cwd: effectiveRoot, stdin: prompt });
+  await appendJsonl(harnessPath(effectiveRoot, LOOP_SESSIONS), {
     version: 1,
     at: timestamp(),
     action: 'agent-exit',
@@ -1525,31 +2248,46 @@ export async function runLoopWorkspace(projectRoot, options = {}) {
     taskTitle: promptResult.task.title,
     ok: run.ok,
     status: run.status,
+    worktreePath: promptResult.workspace?.path ?? effectiveRoot,
+    branch: promptResult.workspace?.branch ?? null,
   });
   if (!run.ok) {
     return {
       ok: false,
       action: 'loop-run',
-      projectRoot,
+      projectRoot: effectiveRoot,
+      sourceProjectRoot: promptResult.sourceProjectRoot,
+      workspace: promptResult.workspace,
       agent,
       task: promptResult.task,
+      promptPath: promptResult.promptPath,
       run,
       errors: [run.stderr || run.stdout || 'Agent 命令执行失败。'],
     };
   }
 
-  const finish = await finishLoopWorkspace(projectRoot, {
+  const finishNotes = [options.notes, `Finished by openprd loop run --agent ${agent}.`]
+    .filter(Boolean)
+    .join('\n');
+  const finish = await finishLoopWorkspace(effectiveRoot, {
     item: promptResult.task.id,
     commit: options.commit,
     message: options.message ?? promptResult.task.commitMessage,
-    notes: `Finished by openprd loop run --agent ${agent}.`,
+    notes: finishNotes,
+    evidence: options.evidence,
+    agent,
+    allowDirtyMain: Boolean(options.allowDirtyMain),
   });
   return {
     ok: finish.ok,
     action: 'loop-run',
-    projectRoot,
+    projectRoot: effectiveRoot,
+    sourceProjectRoot: promptResult.sourceProjectRoot,
+    workspace: promptResult.workspace,
     agent,
     task: promptResult.task,
+    promptPath: promptResult.promptPath,
+    invocation,
     run,
     codexRuntime: codexPreflight,
     preflight: codexPreflight?.preflight ?? null,

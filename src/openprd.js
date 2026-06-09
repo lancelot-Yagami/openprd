@@ -33,7 +33,7 @@ import { doctorOpenPrdAgentIntegration, setupOpenPrdAgentIntegration, updateOpen
 import { finishLoopWorkspace, initLoopWorkspace, nextLoopWorkspace, planLoopWorkspace, promptLoopWorkspace, runLoopWorkspace, statusLoopWorkspace, verifyLoopWorkspace } from './loop.js';
 import { timestamp } from './time.js';
 import { parseCommandArgs, usage } from './cli/args.js';
-import { printAcceptedSpecsResult, printAgentIntegrationResult, printBenchmarkResult, printCaptureResult, printClarifyResult, printClassifyResult, printDevelopmentStandardsResult, printDiagramResult, printDiffResult, printDoctorResult, printFleetResult, printFreezeResult, printGrowthResult, printHandoffResult, printHistoryResult, printInitResult, printInterviewResult, printKnowledgeResult, printLearningResult, printLoopResult, printNextResult, printOpenPrdChangeActionResult, printOpenPrdChangesResult, printOpenSpecChangeValidationResult, printOpenSpecDiscoveryResult, printOpenSpecGenerateResult, printOpenSpecTaskResult, printPlaygroundResult, printQualityResult, printReleaseResult, printReviewResult, printRunResult, printSelfUpdateResult, printStandardsResult, printStatus, printSynthesizeResult, printUpgradeResult, printValidation, printVisualCompareResult } from './cli/print.js';
+import { printAcceptedSpecsResult, printAgentIntegrationResult, printBenchmarkResult, printBrainstormResult, printCaptureResult, printClarifyResult, printClassifyResult, printDesignStarterResult, printDevelopmentStandardsResult, printDiagramResult, printDiffResult, printDoctorResult, printFleetResult, printFreezeResult, printGrowthResult, printHandoffResult, printHistoryResult, printInitResult, printInterviewResult, printKnowledgeResult, printLearningResult, printLoopResult, printNextResult, printOpenPrdChangeActionResult, printOpenPrdChangesResult, printOpenSpecChangeValidationResult, printOpenSpecDiscoveryResult, printOpenSpecGenerateResult, printOpenSpecTaskResult, printPlaygroundResult, printQualityResult, printReleaseResult, printReviewResult, printRunResult, printSelfUpdateResult, printStandardsResult, printStatus, printSynthesizeResult, printUpgradeResult, printValidation, printVisualCompareResult, printVisualPrepareResult } from './cli/print.js';
 import { cjoin, exists, readJson, writeJson, writeText, writeYaml } from './fs-utils.js';
 import { diagramWorkspace } from './diagram-workspace.js';
 import { createOpenSpecDiscoveryWorkspace } from './discovery.js';
@@ -61,11 +61,15 @@ import {
   rejectGrowthCandidateWorkspace,
   reviewGrowthWorkspace,
 } from './growth.js';
+import { brainstormWorkspace } from './brainstorm.js';
+import { buildBrainstormPresentationTemplatePayload, brainstormPresentationWorkspace } from './brainstorm-presentation.js';
+import { designStarterWorkspace } from './design-starter.js';
 import { buildReviewPresentationTemplatePayload, reviewPresentationWorkspace } from './review-presentation.js';
 import { analyzeWorkspaceRegistryHygiene } from './registry-hygiene.js';
 import { syncSessionBindingFromChange } from './session-binding.js';
 import { readSessionRegistry } from './session-registry.js';
 import { visualCompareWorkspace } from './visual-compare.js';
+import { visualPrepareWorkspace } from './visual-prepare.js';
 import { captureWorkspace, clarifyWorkspace, classifyWorkspace, computeWorkspaceGuidance, diffWorkspace, historyWorkspace, interviewWorkspace, nextWorkspace, playgroundWorkspace, reviewWorkspace, synthesizeWorkspace } from './workspace-workflow.js';
 import { appendDecision, appendProgress, appendVerification, appendWorkflowEvent, buildCurrentStateSnapshot, buildWorkflowTaskGraph, computeWorkspaceDigest, CORE_TEMPLATE_FILES, ensureWorkspaceSkeleton, isSupportedProductType, loadCurrentLaneSnapshot, loadLatestVersionSnapshot, loadWorkspace, migrateWorkspaceSkeleton, normalizeVersionId, persistWorkspaceCurrentState, readVersionIndex, resolveActiveTemplatePack, resolveCurrentProductType, validateWorkspace } from './workspace-core.js';
 import { readWorkspaceRegistry } from './workspace-registry.js';
@@ -784,8 +788,10 @@ export async function main(argv = process.argv.slice(2)) {
 
     if (command === 'self-update') {
       const result = await selfUpdateWorkspace({
+        check: flags.check,
         dryRun: flags.dryRun,
         json: flags.json,
+        openprdHome: flags.openprdHome,
       });
       printSelfUpdateResult(result, flags.json);
       return result.ok ? 0 : 1;
@@ -866,6 +872,9 @@ export async function main(argv = process.argv.slice(2)) {
         evidence: flags.evidence,
         notes: flags.notes,
         repairAgent: flags.repairAgent,
+        worktree: flags.worktree,
+        branch: flags.branch,
+        allowDirtyMain: flags.allowDirtyMain,
       };
       if (flags.init) {
         result = await initLoopWorkspace(projectPath, options);
@@ -944,6 +953,20 @@ export async function main(argv = process.argv.slice(2)) {
       return result.ok ? 0 : 1;
     }
 
+    if (command === 'visual-prepare') {
+      const result = await visualPrepareWorkspace(projectPath, {
+        reference: flags.reference,
+        grid: flags.grid,
+        boxes: flags.boxes,
+        include: flags.include,
+        id: flags.id,
+        title: flags.title,
+        out: flags.out,
+      });
+      printVisualPrepareResult(result, flags.json);
+      return result.ok ? 0 : 1;
+    }
+
     if (command === 'visual-compare') {
       const result = await visualCompareWorkspace(projectPath, {
         reference: flags.reference,
@@ -959,6 +982,22 @@ export async function main(argv = process.argv.slice(2)) {
         actualLabel: flags.actualLabel,
       });
       printVisualCompareResult(result, flags.json);
+      return result.ok ? 0 : 1;
+    }
+
+    if (command === 'design-starter') {
+      const result = await designStarterWorkspace(projectPath, {
+        starter: flags.starter,
+        out: flags.out,
+        title: flags.title,
+        brief: flags.brief,
+        sections: flags.sections,
+        noExternalFacts: flags.noExternalFacts,
+        noBrandAssets: flags.noBrandAssets,
+        noRealImages: flags.noRealImages,
+        force: flags.force,
+      });
+      printDesignStarterResult(result, flags.json);
       return result.ok ? 0 : 1;
     }
 
@@ -1073,6 +1112,16 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
 
+    if (command === 'brainstorm') {
+      const result = await brainstormWorkspace(projectPath, {
+        topic: flags.topic,
+        open: flags.open || !flags.json,
+        json: flags.json,
+      });
+      printBrainstormResult(result, flags.json);
+      return 0;
+    }
+
     if (command === 'learn') {
       if (flags.enable || flags.disable) {
         const enabled = flags.enable ? true : false;
@@ -1158,6 +1207,38 @@ export async function main(argv = process.argv.slice(2)) {
         }
         if (result.reviewEntryPath) {
           console.log(`已更新固定入口: ${result.reviewEntryPath}`);
+        }
+      }
+      return flags.failOnViolation && !result.ok ? 1 : 0;
+    }
+
+    if (command === 'brainstorm-presentation') {
+      if (flags.template) {
+        console.log(JSON.stringify(buildBrainstormPresentationTemplatePayload(), null, 2));
+        return 0;
+      }
+      const result = await brainstormPresentationWorkspace(projectPath, {
+        presentationPath: flags.presentation,
+        write: flags.write,
+      });
+      if (flags.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`展示文案校验: ${result.ok ? '通过' : '需要重写'}`);
+        console.log(`主题: ${result.topic}`);
+        console.log(`超限或格式问题: ${result.presentationFeedback.length}`);
+        if (result.presentationFeedback.length > 0) {
+          for (const item of result.presentationFeedback.slice(0, 6)) {
+            const pathHint = item.jsonPath ? `${item.jsonPath}: ` : '';
+            const sizeHint = item.maxChars ? ` 当前 ${item.currentChars} 字，限制 ${item.maxChars} 字。` : '';
+            console.log(`- ${item.area} / ${item.target}: ${pathHint}${item.action}${sizeHint}`);
+          }
+        }
+        if (result.written) {
+          console.log(`已写入: ${result.written}`);
+        }
+        if (result.htmlPath) {
+          console.log(`已更新脑暴页面: ${result.htmlPath}`);
         }
       }
       return flags.failOnViolation && !result.ok ? 1 : 0;
@@ -1384,6 +1465,7 @@ export {
   clarifyWorkspace,
   captureWorkspace,
   playgroundWorkspace,
+  brainstormWorkspace,
   generateLearningReviewWorkspace,
   setLearningReviewModeWorkspace,
   synthesizeWorkspace,
@@ -1392,6 +1474,7 @@ export {
   historyWorkspace,
   releaseWorkspace,
   reviewWorkspace,
+  brainstormPresentationWorkspace,
   reviewPresentationWorkspace,
   freezeWorkspace,
   handoffWorkspace,
@@ -1409,6 +1492,7 @@ export {
   archiveOpenPrdChangeWorkspace,
   listAcceptedSpecsWorkspace,
   diagramWorkspace,
+  designStarterWorkspace,
   classifyWorkspace,
   interviewWorkspace,
   loadWorkspace,
@@ -1423,6 +1507,7 @@ export {
   rejectKnowledgeCandidate,
   archiveKnowledgeCandidate,
   restoreKnowledgeCandidate,
+  visualPrepareWorkspace,
   visualCompareWorkspace,
   checkDevelopmentStandardsWorkspace,
   initGrowthWorkspace,

@@ -275,10 +275,80 @@ function printVisualCompareResult(result, json) {
   }
 }
 
+function printVisualPrepareResult(result, json) {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const modeLabel = result.mode === 'grid' ? '规则网格切片' : '手工裁剪计划';
+  console.log('OpenPrd visual prepare: 已生成');
+  console.log(`reference-set: ${result.referenceSetPath}`);
+  console.log(`输出目录: ${result.outputDir}`);
+  console.log(`模式: ${modeLabel}`);
+  console.log(`参考对象: ${result.itemCount}`);
+  if (result.source?.metadata) {
+    console.log(`参考整板: ${result.source.metadata.width}x${result.source.metadata.height}`);
+  }
+  console.log(`Contact sheet: ${result.contactSheetPath}`);
+  console.log(`Focus 模板: ${result.focusBoardTemplatePath}`);
+  console.log(`Parallel 模板: ${result.parallelBoardTemplatePath}`);
+  console.log(`对比计划: ${result.comparePlanPath}`);
+  for (const action of result.nextActions ?? []) {
+    console.log(`- 下一步: ${action}`);
+  }
+}
+
+function printDesignStarterResult(result, json) {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (!result.ok) {
+    console.log('OpenPrd design starter: 失败');
+    for (const error of result.errors ?? []) {
+      console.log(`- ${error}`);
+    }
+    return;
+  }
+
+  console.log('OpenPrd design starter: 已生成');
+  console.log(`模板: ${result.starterId} (${result.relativeTemplatePath})`);
+  console.log(`输出: ${result.relativeOutputPath}`);
+  if (result.defaults?.lens || result.defaults?.theme || result.defaults?.layout) {
+    console.log(`默认组合: lens=${result.defaults.lens ?? '待补'} theme=${result.defaults.theme ?? '待补'} layout=${result.defaults.layout ?? '待补'}`);
+  }
+  if (result.overwritten) {
+    console.log('覆盖: 是');
+  }
+  if (result.hydrated) {
+    console.log('active design contracts: 已同步写实');
+    if (Array.isArray(result.docsHydrated) && result.docsHydrated.length > 0) {
+      console.log(`docs/basic: 已同步写实 (${result.docsHydrated.length} 份)`);
+    }
+    if (result.sourceManualFilled) {
+      console.log(`文件说明书: 已补到 ${result.relativeOutputPath}`);
+    }
+    if (result.folderManualCreated && result.folderManualPath) {
+      console.log(`文件夹 README: 已补到 ${result.folderManualPath}`);
+    }
+    console.log(`页面主题: ${result.title ?? result.brief ?? '已补'}`);
+    if (Array.isArray(result.sections) && result.sections.length > 0) {
+      console.log(`模块: ${result.sections.join(' / ')}`);
+    }
+    console.log('下一步: 直接在生成的入口文件上继续细化结构和样式，不要回到 pending 合同；禁止删除这个入口文件后另起新稿。如果题目更像导览、旅行、展览或馆藏内容页，保持真实图片路线，不要再把它改回 `--no-real-images`。');
+    return;
+  }
+  console.log('下一步: 立即替换入口文件里的标题、CTA 和所有占位文案，并同步把 active design contracts 写实；只有确认当前页不依赖外部事实、品牌素材或真实图片时，才直接写清无依赖。若题目更像导览、旅行、展览或馆藏内容页，先不要急着加 `--no-real-images`。后续必须继续在生成的入口文件上改，禁止删除后重起。');
+}
+
 export {
   printStandardsResult,
   printDevelopmentStandardsResult,
   printQualityResult,
   printKnowledgeResult,
+  printVisualPrepareResult,
   printVisualCompareResult,
+  printDesignStarterResult,
 };

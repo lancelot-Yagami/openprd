@@ -15,6 +15,8 @@ import {
   applyOpenPrdChangeWorkspace,
   approveBenchmarkWorkspace,
   archiveOpenPrdChangeWorkspace,
+  brainstormPresentationWorkspace,
+  brainstormWorkspace,
   captureWorkspace,
   checkDevelopmentStandardsWorkspace,
   checkStandardsWorkspace,
@@ -149,6 +151,8 @@ test('benchmark add/list/approve/verify and update generated benchmark guidance'
   assert.ok(generatedBenchmarkSkill.includes(addResult.source.repo));
   assert.ok(generatedBenchmarkSkill.includes('AI code review / PR review harness'));
   assert.ok(generatedBenchmarkSkill.includes('merge recommendation'));
+  assert.ok(generatedBenchmarkSkill.includes('change lifecycle'));
+  assert.ok(generatedBenchmarkSkill.includes('mandatory skill routing'));
   assert.ok(generatedBenchmarkSkill.includes('Phosphor Icons'));
   assert.ok(generatedBenchmarkSkill.includes('React Icons'));
 });
@@ -534,6 +538,162 @@ test('playground writes markdown-backed artifact and capture can import from art
   const current = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'state', 'current.json'), 'utf8'));
   assert.equal(current.problemStatement, '新问题定义');
   assert.deepEqual(current.goals, ['新目标1', '新目标2']);
+});
+
+test('brainstorm writes stable html, markdown source and capture patch with benchmark and knowledge context', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'agent' });
+  await captureWorkspace(project, { field: 'problem.problemStatement', value: '团队想先梳理新的 Agent 业务方向', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'users.primaryUsers', value: '产品负责人, 运营负责人', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'users.stakeholders', value: '销售负责人, 交付负责人', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'goals.goals', value: '先收敛第一版业务切片', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'goals.successMetrics', value: '一周内完成 PRD 定稿', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'scope.inScope', value: '梳理用户、商业目标和竞品', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'scope.outOfScope', value: '本轮先不直接开发', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'scenarios.primaryFlows', value: '先脑暴，再确认方向，再生成 PRD', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'typeSpecific.fields.asIs', value: '主要靠人工访谈和零散文档整理', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'typeSpecific.fields.toBe', value: '先形成可评审的方向梳理工作台', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.community', value: 'AI 创业社群, 现有客户群', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.seedUsers', value: '产品负责人, 交付负责人', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.currentAlternative', value: '顾问式访谈和手工表格跟进', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.manualPath', value: '先做顾问式访谈, 手工整理成方向建议', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.commitmentSignals', value: '愿意拿真实项目试跑, 愿意安排 30 分钟共创', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.firstValidationStep', value: '先找 1 个真实项目做手工试跑', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'validation.defaultAlivePlan', value: '两周内没试跑就先停在顾问式服务', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'risks.assumptions', value: '现有项目里确实有可复用能力', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'risks.openQuestions', value: '现有项目里哪些能力可复用', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'businessGuardrails.stopLossActions', value: '如果两轮后仍无方向，就先停在调研结论', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'handoff.nextStep', value: '先找 1 个真实项目做低成本试跑', source: 'user-confirmed' });
+  await addBenchmarkWorkspace(project, {
+    source: 'https://github.com/Fission-AI/OpenSpec',
+    notes: '参考独立 explore / spec 之前先探索的流程',
+  });
+  const benchmark = await addBenchmarkWorkspace(project, {
+    source: 'https://github.com/obra/superpowers',
+    notes: '参考强约束 brainstorm 到设计文档的过渡',
+  });
+  await approveBenchmarkWorkspace(project, { id: benchmark.source.id });
+
+  const result = await brainstormWorkspace(project, {
+    topic: 'Agent 业务方向梳理',
+    open: false,
+  });
+
+  assert.ok(result.htmlPath.endsWith(path.join('.openprd', 'engagements', 'active', 'brainstorm.html')));
+  assert.ok(result.markdownPath.endsWith('data.md'));
+  assert.ok(result.patchPath.endsWith('capture-patch.json'));
+  assert.ok(result.statePath.endsWith(path.join('.openprd', 'engagements', 'active', 'brainstorm.json')));
+
+  const html = await fs.readFile(result.htmlPath, 'utf8');
+  assert.ok(html.includes('OpenPrd / 方向梳理'));
+  assert.ok(html.includes('先整理验证计划'));
+  assert.ok(html.includes('按这个方向整理成 PRD'));
+  assert.ok(html.includes('本次讨论的核心诉求'));
+  assert.ok(html.includes('一眼看懂这次讨论'));
+  assert.ok(html.includes('先验证什么，再决定做多大'));
+  assert.ok(html.includes('brainstorm-visual-svg-wrap'));
+  assert.ok(html.includes('role="img" aria-label="一眼看懂这次讨论"'));
+  assert.ok(html.includes('role="img" aria-label="先验证什么，再决定做多大"'));
+  assert.ok(html.includes('现在主要怎么解决'));
+  assert.ok(html.includes('假设与验证'));
+  assert.equal(html.includes('回填与文件入口'), false);
+  assert.equal(html.includes('JTBD'), false);
+
+  const markdown = await fs.readFile(result.markdownPath, 'utf8');
+  assert.ok(markdown.includes('kind: brainstorm'));
+  assert.ok(markdown.includes('capturePatch:'));
+  assert.ok(markdown.includes('## 当前替代方案'));
+  assert.ok(markdown.includes('## 验证闭环'));
+  assert.ok(markdown.includes('## 商业闭环'));
+  assert.ok(markdown.includes('## 假设与验证'));
+
+  const patch = JSON.parse(await fs.readFile(result.patchPath, 'utf8'));
+  assert.equal(patch['problem.problemStatement'].value, '团队想先梳理新的 Agent 业务方向');
+  assert.deepEqual(patch['users.primaryUsers'].value, ['产品负责人', '运营负责人']);
+  assert.deepEqual(patch['users.stakeholders'].value, ['销售负责人', '交付负责人']);
+  assert.equal(patch['typeSpecific.fields.asIs'].value, '主要靠人工访谈和零散文档整理');
+  assert.deepEqual(patch['validation.community'].value, ['AI 创业社群', '现有客户群']);
+  assert.equal(patch['validation.currentAlternative'].value, '顾问式访谈和手工表格跟进');
+  assert.deepEqual(patch['validation.manualPath'].value, ['先做顾问式访谈', '手工整理成方向建议']);
+  assert.deepEqual(patch['validation.commitmentSignals'].value, ['愿意拿真实项目试跑', '愿意安排 30 分钟共创']);
+  assert.equal(patch['validation.firstValidationStep'].value, '先找 1 个真实项目做手工试跑');
+  assert.deepEqual(patch['validation.defaultAlivePlan'].value, ['两周内没试跑就先停在顾问式服务']);
+  assert.deepEqual(patch['risks.assumptions'].value, ['现有项目里确实有可复用能力']);
+  assert.deepEqual(patch['businessGuardrails.stopLossActions'].value, ['如果两轮后仍无方向，就先停在调研结论']);
+
+  const state = JSON.parse(await fs.readFile(result.statePath, 'utf8'));
+  assert.equal(state.topic, 'Agent 业务方向梳理');
+  assert.equal(state.summary.currentAlternative, '现在主要还是靠“顾问式访谈和手工表格跟进”在解决');
+  assert.deepEqual(state.captureState.community, ['AI 创业社群', '现有客户群']);
+  assert.deepEqual(state.captureState.manualPath, ['先做顾问式访谈', '手工整理成方向建议']);
+  assert.deepEqual(state.captureState.commitmentSignals, ['愿意拿真实项目试跑', '愿意安排 30 分钟共创']);
+  assert.equal(state.captureState.firstValidationStep, '先找 1 个真实项目做手工试跑');
+  assert.ok(Array.isArray(state.report.validationLoop));
+  assert.ok(state.report.validationLoop.some((item) => item.includes('当前主要替代方案是：顾问式访谈和手工表格跟进')));
+  assert.ok(Array.isArray(state.report.businessViability));
+  assert.ok(state.report.businessViability.some((item) => item.includes('先用这种承诺证明值得继续')));
+  assert.equal(state.benchmark.counts.approved >= 1, true);
+  assert.equal(state.knowledge.counts.skills >= 0, true);
+  assert.equal(Array.isArray(state.workspaceScan.docs), true);
+});
+
+test('brainstorm-presentation writes validated presentation and re-renders brainstorm html', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'agent' });
+  await captureWorkspace(project, { field: 'problem.problemStatement', value: '需要先把复杂需求梳理清楚', source: 'user-confirmed' });
+  await captureWorkspace(project, { field: 'goals.goals', value: '先确认推荐方向', source: 'user-confirmed' });
+
+  await brainstormWorkspace(project, {
+    topic: '复杂需求脑暴',
+    open: false,
+  });
+
+  const presentationPath = await writeAnswersFile(project, 'brainstorm-presentation.json', {
+    brainstormPresentation: {
+      hero: {
+        summary: '这次先把复杂需求里的业务目标、用户场景、可复用能力和风险一起梳理清楚，再进入 PRD。',
+        direction: '先收敛第一版做法',
+        confidence: '还差 1 轮用户确认',
+      },
+      visualScenes: [
+        {
+          type: 'validation-ladder',
+          title: '先验证什么',
+          subtitle: '先把关键前提、验证动作和止损线摆出来。',
+          items: [
+            { label: '关键前提', title: '先确认用户真会用', detail: '先找最近一次真实案例，验证这是不是高频问题。', tone: 'risk' },
+            { label: '先怎么验', title: '先做一轮访谈', detail: '先补 3 个真实案例，再决定要不要进入完整 PRD。', tone: 'map' },
+            { label: '什么算过', title: '先定义过关标准', detail: '如果 3 个案例都指向同一问题，就继续收敛第一版。', tone: 'success' },
+            { label: '什么先停', title: '提前约定止损线', detail: '如果真实案例分散，就先停在调研结论。', tone: 'guardrail' },
+          ],
+        },
+      ],
+      panels: {
+        userSignals: [{ summary: '现在怎么做', detail: '先说清现在主要靠什么办法在解决。' }],
+        marketSignals: [{ summary: '推荐方向', detail: '先收敛第一版做法，再决定要不要继续放大范围。' }],
+        reuseOpportunities: [{ summary: '关键参与方', detail: '先补齐谁会拍板、谁会受影响。' }],
+        risks: [{ summary: '止损线', detail: '如果真实案例分散，就先停在调研结论。' }],
+      },
+    },
+  });
+
+  const result = await brainstormPresentationWorkspace(project, {
+    presentationPath,
+    write: true,
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.htmlPath.endsWith(path.join('.openprd', 'engagements', 'active', 'brainstorm.html')));
+
+  const state = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'engagements', 'active', 'brainstorm.json'), 'utf8'));
+  assert.equal(state.brainstormPresentationMeta.validator, 'openprd brainstorm-presentation');
+
+  const html = await fs.readFile(result.htmlPath, 'utf8');
+  assert.ok(html.includes('还差 1 轮用户确认'));
+  assert.ok(html.includes('先收敛第一版做法'));
+  assert.ok(html.includes('目前更建议的方向'));
+  assert.ok(html.includes('先验证什么'));
+  assert.ok(html.includes('关键前提'));
+  assert.ok(html.includes('role="img" aria-label="先验证什么"'));
 });
 
 test('learning review toggles mode and generates archived reader package', async () => {

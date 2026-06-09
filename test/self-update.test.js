@@ -22,14 +22,44 @@ function fakePackageInfo() {
   };
 }
 
+function fakeWorkspaceRegistry(entries = []) {
+  return {
+    registryPath: '/tmp/.openprd/registry/workspaces.jsonl',
+    staleEntries: [],
+    entries,
+  };
+}
+
 function createWorkspaceWithCalls(options = {}) {
   const calls = [];
   const workspace = createSelfUpdateWorkspace({
     readPackageInfo: async () => fakePackageInfo(),
     isLocalSourceCheckout: async () => Boolean(options.localCheckout),
     resolveOpenPrdExecutable: async () => ({ ok: true, executable: '/tmp/bin/openprd', error: null }),
+    readWorkspaceRegistry: async () => fakeWorkspaceRegistry(options.registryEntries),
     runCommand: async (command, args) => {
       calls.push({ command, args });
+      if (command === 'npm' && args[0] === 'view') {
+        const stdout = options.publishedVersionJson ?? JSON.stringify(options.publishedVersion ?? '0.1.0');
+        return {
+          ok: true,
+          command,
+          args,
+          exitCode: 0,
+          stdout,
+          stderr: '',
+        };
+      }
+      if (command === '/tmp/bin/openprd' && args[0] === '--version') {
+        return {
+          ok: true,
+          command,
+          args,
+          exitCode: 0,
+          stdout: options.installedVersion ?? '0.1.0',
+          stderr: '',
+        };
+      }
       const ok = options.failInstall ? calls.length > 1 : !options.failAll;
       return {
         ok,
@@ -78,6 +108,7 @@ test('upgrade runs self-update before refreshing a single project with the resol
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [
     { command: 'npm', args: ['install', '-g', '@openprd/cli@latest'] },
+    { command: '/tmp/bin/openprd', args: ['--version'] },
     { command: '/tmp/bin/openprd', args: ['update', project, '--tools', 'codex', '--hook-profile', 'guarded', '--force', '--json'] },
   ]);
   assert.deepEqual(result.stages, { selfUpdateOk: true, projectRefreshOk: true });
@@ -97,7 +128,7 @@ test('upgrade fleet mode refreshes historical OpenPrd projects through fleet upd
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(calls[1], {
+  assert.deepEqual(calls[2], {
     command: '/tmp/bin/openprd',
     args: ['fleet', root, '--update-openprd', '--max-depth', '2', '--include', 'client-*', '--exclude', 'archive', '--report', 'fleet-report.json', '--tools', 'all'],
   });
@@ -113,4 +144,78 @@ test('upgrade does not refresh projects when self-update fails', async () => {
   assert.deepEqual(result.stages, { selfUpdateOk: false, projectRefreshOk: false });
   assert.equal(result.projectRefresh.skipped, true);
   assert.equal(calls.length, 1);
+});
+
+test('self-update check reads the published version and lists older workspace refresh candidates', async () => {
+  const { calls, workspace } = createWorkspaceWithCalls({
+    publishedVersionJson: JSON.stringify(['0.1.10']),
+    registryEntries: [
+      {
+        workspaceRoot: '/tmp/ws-a',
+        workspaceName: 'ws-a',
+        openprdVersion: '0.1.8',
+      },
+      {
+        workspaceRoot: '/tmp/ws-b',
+        workspaceName: 'ws-b',
+        openprdVersion: '0.1.10',
+      },
+      {
+        workspaceRoot: '/tmp/archive/ws-c',
+        workspaceName: 'ws-c',
+        openprdVersion: '0.1.7',
+      },
+    ],
+  });
+
+  const result = await workspace.selfUpdateWorkspace({ check: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checkOnly, true);
+  assert.equal(result.publishedVersion, '0.1.10');
+  assert.equal(result.comparison, 'behind');
+  assert.equal(result.refreshCandidates.total, 2);
+  assert.deepEqual(result.refreshCandidates.projects.map((item) => ({
+    workspaceRoot: item.workspaceRoot,
+    currentVersion: item.currentVersion,
+    targetVersion: item.targetVersion,
+    note: item.note,
+  })), [
+    {
+      workspaceRoot: '/tmp/archive/ws-c',
+      currentVersion: '0.1.7',
+      targetVersion: '0.1.10',
+      note: '归档项目，建议先确认',
+    },
+    {
+      workspaceRoot: '/tmp/ws-a',
+      currentVersion: '0.1.8',
+      targetVersion: '0.1.10',
+      note: '可直接处理',
+    },
+  ]);
+  assert.deepEqual(calls, [
+    { command: 'npm', args: ['view', '@openprd/cli', 'version', '--json'] },
+  ]);
+});
+
+test('self-update records installed version and refresh candidates after install', async () => {
+  const { workspace } = createWorkspaceWithCalls({
+    installedVersion: '0.1.10',
+    registryEntries: [
+      {
+        workspaceRoot: '/tmp/ws-a',
+        workspaceName: 'ws-a',
+        openprdVersion: '0.1.9',
+      },
+    ],
+  });
+
+  const result = await workspace.selfUpdateWorkspace({});
+
+  assert.equal(result.ok, true);
+  assert.equal(result.installedVersion.version, '0.1.10');
+  assert.equal(result.refreshCandidates.total, 1);
+  assert.equal(result.refreshCandidates.projects[0].workspaceRoot, '/tmp/ws-a');
+  assert.equal(result.nextActions[0], 'If you want to refresh older workspaces too, review the refreshCandidates list before running fleet or per-project updates.');
 });

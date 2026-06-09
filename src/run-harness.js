@@ -32,6 +32,13 @@ const CONTINUATION_WORK_UNIT_PATTERN = /\bwu-[a-z0-9._-]+\b/i;
 const CONTINUATION_EXPLICIT_PATTERN = /(?:(?:继续|续做|接着做|继续执行|继续推进)(?:这个|这条|当前)?\s*(?:对话|任务|会话|记录|历史|Codex\s*任务)|(?:对话|任务|会话|记录|历史|Codex\s*任务).{0,6}(?:继续|续做|接着做|继续执行|继续推进)|^(?:继续|续做|接着做|继续执行|继续推进)\s*(?::|：))/i;
 const CONTINUATION_CURRENT_PATTERN = /(继续当前|当前(这个|这条)?(任务|会话|记录|需求|变更)|current\s+(task|change|session)|resume current)/i;
 const SHORT_AFFIRMATIVE_PATTERN = /^(可以|好|行|确认|没问题|OK|ok|yes|Yes|yep|Yep)[。！!,.，\s]*$/;
+const EXPLICIT_ISOLATION_NEGATION_PATTERN = /(?:(?:不要|别|不用|无需|不需要|禁止|不要再|不想).{0,8}(?:单独环境|隔离环境|独立环境|独立\s*(?:session|cwd)|独立工作树|单独\s*worktree|worktree|新分支|独立分支)|(?:单独环境|隔离环境|独立环境|独立\s*(?:session|cwd)|独立工作树|单独\s*worktree|worktree|新分支|独立分支).{0,8}(?:不要|别|不用|无需|不需要|禁止))/i;
+const EXPLICIT_ISOLATION_REQUEST_PATTERNS = [
+  /(?:请|麻烦|需要|希望|可以|最好|改成|按).{0,8}(?:单独环境|隔离环境|独立环境|独立\s*(?:session|cwd)|独立工作树|单独\s*worktree|worktree|新分支|独立分支).{0,12}(?:继续|处理|推进|实现|做|执行)/i,
+  /(?:继续|处理|推进|实现|做|执行).{0,12}(?:单独环境|隔离环境|独立环境|独立\s*(?:session|cwd)|独立工作树|单独\s*worktree|worktree|新分支|独立分支)/i,
+  /(?:use|with|in)\s+(?:an?\s+)?(?:isolated|separate|dedicated)\s+(?:environment|session|cwd|worktree|branch)/i,
+];
+const EXPLICIT_BRAINSTORM_REQUEST = /(脑暴|brainstorm|帮忙梳理|梳理一下|梳理下|先想清楚)/iu;
 function harnessFile(projectRoot, relativePath) {
   return cjoin(projectRoot, relativePath);
 }
@@ -41,6 +48,14 @@ function rootsEqual(left, right) {
     return false;
   }
   return path.resolve(left) === path.resolve(right);
+}
+
+function hasExplicitIsolationRequest(message = null) {
+  const text = String(message ?? '').trim();
+  if (!text || EXPLICIT_ISOLATION_NEGATION_PATTERN.test(text)) {
+    return false;
+  }
+  return EXPLICIT_ISOLATION_REQUEST_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 async function ensureRunHarness(projectRoot) {
@@ -336,6 +351,61 @@ function analyzeRunMessage(message = null) {
     workUnitId,
     explicitCurrent,
     text,
+  };
+}
+
+function inferPromptDrivenLightweightRecommendation(message = null) {
+  const text = String(message ?? '').trim();
+  if (!text) {
+    return null;
+  }
+  const explicitBrainstorm = EXPLICIT_BRAINSTORM_REQUEST.test(text);
+  const readOnly = /(先分析|先看看|先评估|review|审查|怎么改|规划一下|先梳理|先想清楚|会动哪些文件)/i.test(text)
+    && !/(直接实现|直接做|直接改|帮我修|帮我实现|请直接实现|继续实现|直接完成)/i.test(text);
+  if (explicitBrainstorm || readOnly) {
+    return null;
+  }
+  const noConfirmationRequested = /(不需要(?:先)?(?:来回)?确认|无需(?:任何)?确认|不用确认|别再确认|不要确认|直接完成|直接做完)/i.test(text);
+  const scopedFrontendSurface = /(首页|页面|界面|落地页|原型|静态单页|静态页|详情页|设置页|列表页|dashboard|hero|layout|app\s*首页)/i.test(text);
+  const scopedFrontendChange = scopedFrontendSurface
+    && /(实现|做一个|做个|完成|新增|增加|补一个|优化|调整|改版|重做|prototype|原型)/i.test(text);
+  const tinyUiAdjustment = /(按钮|文案|颜色|圆角|位置|间距|字号|图标|标题|空格|标点|label|copy|toast|placeholder)/i.test(text)
+    && /(改|调|修|优化|调整|短一点|换成|统一)/i.test(text);
+  if (tinyUiAdjustment) {
+    return {
+      type: 'lightweight-implementation',
+      nextAction: 'lightweight-l0',
+      title: '按直接处理路径继续',
+      command: null,
+      verifyCommand: 'openprd run . --verify',
+      reason: [
+        '当前更像一次局部直接处理，不必先走正式 PRD/review/change/tasks。',
+        '直接落地改动并补最小足够验证即可。',
+      ].join(' '),
+      changeId: null,
+      task: null,
+      coverageItem: null,
+    };
+  }
+  if (!scopedFrontendChange) {
+    return null;
+  }
+  return {
+    type: 'lightweight-implementation',
+    nextAction: 'lightweight-l1',
+    title: noConfirmationRequested ? '按轻量原型路径继续实现' : '先给 mini-plan 再继续实现',
+    command: null,
+    verifyCommand: 'openprd run . --verify',
+    reason: [
+      '当前更像现有功能优化或轻量原型实现，不必先走正式 PRD/review/change/tasks。',
+      noConfirmationRequested
+        ? '用户已经明确表示不需要先来回确认，可以先用 3-5 行 mini-plan 自定目标、范围内、范围外和验证方式，然后继续实现。'
+        : '先用 3-5 行 mini-plan 收一下目标、范围内、范围外和验证方式，再继续实现。',
+      '如果是新界面或大幅首页调整，先补 `.openprd/design/active/` 下的 facts-sheet、asset-spec、image-preflight、direction-plan 和 selected-direction；空白工作区优先从 `.openprd/design/templates/` 里挑最近模板。若当前轮用户已经把页面主题、模块范围或“直接实现”的意图说清，优先改用 `openprd run . --context --message <用户原话>` 对齐建议，而不是先跑不带 message 的 context。若页面主题和模块范围已经明确，优先运行 `openprd design-starter . --starter <starter-id> --out index.html --brief "<页面主题>" --sections "<模块1|模块2|模块3>"`，让 starter 一次写实合同和首版文案；只有像个人博客、工具台、纯结构化产品页这类确认不靠真实图片成立的页面，才补 `--no-external-facts --no-brand-assets --no-real-images`。若任务更像旅游、导览、展览、博物馆、城市、自然观察或案例内容页，先不要带 `--no-real-images`，让 starter 先尝试补首批真实图片。若用户已经给了效果图、设计稿、参考截图或其他明确参考图，先把它当主参考源；只有现有 starter、theme、layout 足够接近时才复用，不接近就以参考图为准。若这类冷启动即使带 message 仍短暂返回 `clarify-user`，把它视为摘要级提醒：先用 3-5 行 mini-plan 收口，再进入 starter 后的 `Patch Mode`。`Patch Mode` 的默认动作是继续在当前 `index.html` 上补丁细化；就算想整页重写，也是在同一路径内覆盖，不做 delete-first。如果确实要整页重写，先把完整新稿写到 sibling draft，例如 `index.next.html`，确认内容成形后再覆盖回 `index.html`，不要让入口文件出现空窗。starter 一落地后，只允许做一轮就地对焦：快速读一次生成的入口文件和必要的 active design artifacts；这轮对焦结束后，下一步就必须是真实写入口，不要再回头搜网页、翻 `docs/basic/` 或继续模板漫游。把最后一批必要的查事实、查图、读模板动作放在口头宣布之前做完；一旦已经说“开始覆盖入口文件”或“开始整页重写”，下一步必须出现真实写文件动作，而不是继续只读浏览、压图或停在口头承诺；必要时 hook 会把这类非写入动作挡回去。真正完成还包括：入口文件本体已改完、主要占位已清掉、已准备好的真实图片或参考约束已落进页面，不是只补合同或只下载素材。',
+    ].join(' '),
+    changeId: null,
+    task: null,
+    coverageItem: null,
   };
 }
 
@@ -1184,6 +1254,7 @@ function buildSessionContinuationRecommendation(recommendation, lane) {
   const sessionId = lane?.target?.sessionId ?? lane?.sessionId ?? lane?.selector ?? null;
   const targetWorkspaceRoot = lane?.target?.workspaceRoot ?? lane?.resolution?.workspaceRoot ?? lane?.currentProjectRoot ?? null;
   const crossWorkspace = Boolean(targetWorkspaceRoot && lane?.currentProjectRoot && !rootsEqual(targetWorkspaceRoot, lane.currentProjectRoot));
+  const explicitIsolationRequest = hasExplicitIsolationRequest(lane?.text);
   const recoveredTarget = [
     lane?.target?.changeId ? `变更 ${lane.target.changeId}` : null,
     lane?.target?.taskHandle ? `任务句柄 ${lane.target.taskHandle}` : null,
@@ -1221,9 +1292,19 @@ function buildSessionContinuationRecommendation(recommendation, lane) {
     coverageItem: null,
     continuationTarget: lane.target ?? null,
     isolation: {
-      required: true,
-      worktreeRecommended: true,
-      reason: crossWorkspace ? '跨工作区恢复时先回到正确 workspace，再在隔离环境里继续实现。' : '历史会话恢复默认建议使用独立 session / cwd，避免共享执行线内容。',
+      required: crossWorkspace,
+      worktreeRecommended: explicitIsolationRequest,
+      reason: explicitIsolationRequest
+        ? (
+            crossWorkspace
+              ? '先切回正确工作区，再按你明确要求的单独环境方式继续推进。'
+              : '你已经明确要求按单独环境处理；恢复到对应上下文后，我会按隔离方式继续推进。'
+          )
+        : (
+            crossWorkspace
+              ? '先切回正确工作区继续推进，不默认追加单独环境。'
+              : '历史会话恢复默认沿用当前上下文继续推进，不额外建议单独环境。'
+          ),
     },
     previousRecommendation: recommendation
       ? {
@@ -1355,7 +1436,14 @@ function buildPrdPromotionRecommendation({ changes, next }) {
 
 function buildRequirementIntakeRecommendation({ gate, next, activeChange }) {
   const nextAction = next?.recommendation?.nextAction ?? 'clarify-user';
+  const brainstormSuggestion = next?.brainstormSuggestion?.recommended ? next.brainstormSuggestion : null;
+  const shouldRouteToBrainstorm = Boolean(
+    brainstormSuggestion
+    && brainstormSuggestion.explicitTrigger === true
+    && ['clarify-user', 'classify', 'interview'].includes(nextAction)
+  );
   const titleByAction = {
+    brainstorm: '先进入脑暴模式收敛方向',
     'clarify-user': '继续本轮需求入口澄清',
     classify: '补齐本轮需求的产品类型',
     interview: '补齐本轮需求的关键事实',
@@ -1367,13 +1455,20 @@ function buildRequirementIntakeRecommendation({ gate, next, activeChange }) {
   };
   return {
     type: 'requirement-intake',
-    title: titleByAction[nextAction] ?? '继续本轮需求入口',
-    command: next?.recommendation?.suggestedCommand ?? 'openprd clarify .',
+    nextAction: shouldRouteToBrainstorm ? 'brainstorm' : nextAction,
+    title: titleByAction[shouldRouteToBrainstorm ? 'brainstorm' : nextAction] ?? '继续本轮需求入口',
+    command: shouldRouteToBrainstorm
+      ? (brainstormSuggestion?.suggestedCommand ?? 'openprd brainstorm . --open')
+      : (next?.recommendation?.suggestedCommand ?? 'openprd clarify .'),
     verifyCommand: 'openprd run . --verify',
     reason: [
-      '当前有一条还在推进中的新需求；先把需求澄清、确认，再整理本次调整和后续任务。',
+      shouldRouteToBrainstorm
+        ? '当前这条需求更适合先把方向、替代方案、目标结果和验证方式梳理清楚，再进入正式 PRD。'
+        : '当前有一条还在推进中的新需求；先把需求澄清、确认，再整理本次调整和后续任务。',
       activeChange ? `之前还有一项历史事项 ${activeChange}，这里只把它当背景提醒，不抢这次主线。` : null,
-      next?.recommendation?.reason ?? null,
+      shouldRouteToBrainstorm
+        ? (brainstormSuggestion?.reason ?? next?.recommendation?.reason ?? null)
+        : (next?.recommendation?.reason ?? null),
     ].filter(Boolean).join(' '),
     changeId: null,
     task: null,
@@ -1384,6 +1479,40 @@ function buildRequirementIntakeRecommendation({ gate, next, activeChange }) {
       intakeMode: gate?.intakeMode ?? null,
       sessionId: gate?.sessionId ?? null,
     },
+  };
+}
+
+function hasExplicitBrainstormRequest(message) {
+  return EXPLICIT_BRAINSTORM_REQUEST.test(String(message ?? ''));
+}
+
+function buildBrainstormRunRecommendation({ next, message, activeChange, focusedChangeId }) {
+  const brainstormSuggestion = next?.brainstormSuggestion?.recommended ? next.brainstormSuggestion : null;
+  const nextAction = next?.recommendation?.nextAction ?? 'clarify-user';
+  const explicitBrainstorm = hasExplicitBrainstormRequest(message) || brainstormSuggestion?.explicitTrigger === true;
+  if (
+    !explicitBrainstorm
+    || !['clarify-user', 'classify', 'interview'].includes(nextAction)
+  ) {
+    return null;
+  }
+  return {
+    type: 'workflow',
+    nextAction: 'brainstorm',
+    title: '先进入脑暴模式收敛方向',
+    command: brainstormSuggestion.suggestedCommand ?? 'openprd brainstorm . --open',
+    verifyCommand: 'openprd validate .',
+    reason: [
+      '当前这条需求更适合先把方向、替代方案、目标结果和验证方式梳理清楚，再进入正式 PRD。',
+      activeChange ? `之前还有一项历史事项 ${activeChange}，这里只把它当背景提醒，不抢这次主线。` : null,
+      brainstormSuggestion?.reason
+        ?? (explicitBrainstorm ? '用户当前更像是在请求先梳理业务方向。' : null)
+        ?? next?.recommendation?.reason
+        ?? null,
+    ].filter(Boolean).join(' '),
+    changeId: focusedChangeId ?? activeChange,
+    task: null,
+    coverageItem: null,
   };
 }
 
@@ -1495,19 +1624,27 @@ function buildRunRecommendation({
   if (requirementGateAssessment?.relevance === 'primary') {
     return buildRequirementIntakeRecommendation({ gate: requirementGate, next, activeChange });
   }
+  const brainstormRecommendation = (
+    !laneRequest?.requested
+    && !resolvedTarget?.matched
+  )
+    ? buildBrainstormRunRecommendation({ next, message, activeChange, focusedChangeId })
+    : null;
+  if (brainstormRecommendation) {
+    return brainstormRecommendation;
+  }
   if (taskState?.nextTask) {
     const task = compactTask(taskState.nextTask);
     const totalTasks = Number(taskState.summary?.total ?? taskState.tasks?.length ?? 0);
     const pendingTasks = Number(taskState.summary?.pending ?? 0);
     const implementationTasks = Number(taskState.summary?.implementation?.total ?? 0);
     const pendingImplementationTasks = Number(taskState.summary?.implementation?.pending ?? 0);
-    const laneRequiresIsolation = Boolean(
+    const explicitIsolationRequest = hasExplicitIsolationRequest(message);
+    const laneTargetsHistoricalContext = Boolean(
       resolvedTarget?.workspaceRoot && !rootsEqual(resolvedTarget.workspaceRoot, projectRoot)
         || ['session', 'task-handle', 'work-unit'].includes(laneRequest?.selectorType ?? '')
     );
-    const executionMode = laneRequiresIsolation
-      ? 'parallel-workers-isolated'
-      : (
+    const executionMode = (
       implementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
       || pendingImplementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
     )
@@ -1522,7 +1659,7 @@ function buildRunRecommendation({
       executionMode,
       taskState,
       focusTask: task,
-      worktreeRecommended: laneRequiresIsolation || executionMode === 'parallel-workers-isolated',
+      worktreeRecommended: explicitIsolationRequest || executionMode === 'parallel-workers-isolated',
     });
     if (
       implementationTasks >= OPENPRD_LOOP_REQUIRED_IMPLEMENTATION_TASK_THRESHOLD
@@ -1541,9 +1678,11 @@ function buildRunRecommendation({
           : `openprd loop . --plan --change ${shellQuote(taskState.changeId)} && openprd loop . --run --agent codex --item ${shellQuote(task.id)}`,
         commitCommand: `openprd loop . --finish --item ${shellQuote(task.id)} --commit`,
         verifyCommand: `openprd loop . --verify --item ${shellQuote(task.id)}`,
-        reason: laneRequiresIsolation
-          ? '这件事来自指定历史记录，最好放到单独环境里接着做，避免和别的事项串线。'
-          : '待落地内容比较多，适合拆成一个个独立小任务推进，再统一收口检查。',
+        reason: explicitIsolationRequest
+          ? '你已经明确要求按单独环境继续；我会先回到对应上下文，再按长程 loop 方式推进。'
+          : laneTargetsHistoricalContext
+            ? '这件事来自指定历史记录；先回到对应上下文，再按长程 loop 方式拆成小任务推进。'
+            : '待落地内容比较多，适合拆成一个个独立小任务推进，再统一收口检查。',
         changeId: taskState.changeId,
         task,
         coverageItem: null,
@@ -1562,8 +1701,10 @@ function buildRunRecommendation({
         },
       };
     }
-    const lightweightReason = laneRequiresIsolation
-      ? '这件事来自指定历史记录，最好放到单独环境里继续，避免和别的事项串线。'
+    const lightweightReason = explicitIsolationRequest
+      ? '你已经明确要求按单独环境继续；我会沿着当前任务上下文按隔离方式推进。'
+      : laneTargetsHistoricalContext
+        ? '这件事来自指定历史记录；先回到对应上下文继续推进，不默认追加单独环境。'
       : executionMode === 'parallel-workers'
         ? '待处理的落地内容比较多，适合先分头推进，再统一收口检查。'
         : '已经有一项可以继续推进的后续任务；只要用户明确要继续，就可以往下做。';
@@ -1590,7 +1731,7 @@ function buildRunRecommendation({
         pendingTasks,
         implementationTasks,
         pendingImplementationTasks,
-        worktreeRecommended: laneRequiresIsolation,
+        worktreeRecommended: explicitIsolationRequest,
       },
     };
   }
@@ -1674,7 +1815,15 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
   } = dependencies;
   await ensureRunHarness(projectRoot);
   const runState = await readRunState(projectRoot);
-  const laneRequest = analyzeRunMessage(options.message);
+  const currentTurn = await readJson(harnessFile(projectRoot, OPENPRD_HARNESS_TURN_STATE)).catch(() => null);
+  const currentTurnPrompt = String(currentTurn?.prompt ?? '').trim();
+  const fallbackPrompt = !options.hookInject
+    ? (inferPromptDrivenLightweightRecommendation(currentTurnPrompt) ? currentTurnPrompt : null)
+    : null;
+  const effectiveMessage = String(options.message ?? '').trim()
+    || fallbackPrompt
+    || null;
+  const laneRequest = analyzeRunMessage(effectiveMessage);
   const validation = await validateWorkspace(projectRoot)
     .then(({ report }) => report)
     .catch((error) => ({
@@ -1713,12 +1862,12 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
   }
   const currentWorkspaceArtifacts = await resolveWorkspaceArtifacts(projectRoot);
   const loopFeatureList = currentWorkspaceArtifacts.loopFeatureList;
-  const shouldResolveTarget = Boolean(String(options.message ?? '').trim());
+  const shouldResolveTarget = Boolean(String(effectiveMessage ?? '').trim());
   const resolutionIndex = shouldResolveTarget ? currentWorkspaceArtifacts.index : null;
   const resolvedTarget = shouldResolveTarget
     ? await resolveRunTarget({
         projectRoot,
-        message: options.message,
+        message: effectiveMessage,
         request: laneRequest,
         index: resolutionIndex,
         loopFeatureList,
@@ -1726,7 +1875,7 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
       })
     : null;
   const requirementGateAssessment = assessRequirementGateRelevance({
-    message: options.message,
+    message: effectiveMessage,
     gate: requirementGate,
     laneRequest,
     resolvedTarget,
@@ -1737,9 +1886,19 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     : null;
   const resumedDiscovery = await resumeOpenSpecDiscoveryWorkspace(projectRoot).catch(() => null);
   const discovery = shouldSurfaceDiscoveryInRunContext(resumedDiscovery) ? resumedDiscovery : null;
-  const recommendation = buildRunRecommendation({
+  const promptDrivenRecommendation = (
+    !requirementGate
+    && !activeChange
+    && !taskState?.nextTask
+    && !discovery
+    && !resolvedTarget?.matched
+    && !laneRequest?.requested
+  )
+    ? inferPromptDrivenLightweightRecommendation(effectiveMessage)
+    : null;
+  const recommendation = promptDrivenRecommendation ?? buildRunRecommendation({
     projectRoot,
-    message: options.message,
+    message: effectiveMessage,
     changes,
     activeChange,
     focusedChangeId,
@@ -1755,7 +1914,7 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
   });
   const nextTask = compactTask(taskState?.nextTask ?? null);
   const lane = buildRunLane({
-    message: options.message,
+    message: effectiveMessage,
     recommendation,
     activeChange,
     latestPrd,
@@ -1776,8 +1935,8 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     { requirementGate },
   );
   const knowledgeSkillMatches = await resolveKnowledgeSkillMatches(projectRoot, {
-    message: options.message,
-    prompt: options.message,
+    message: effectiveMessage,
+    prompt: effectiveMessage,
     recommendationTitle: effectiveRecommendation.title,
     recommendationReason: effectiveRecommendation.reason,
     activeChange,
@@ -1794,7 +1953,7 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
       stages: options.hookInject ? ['hit', 'referenced', 'injected'] : ['hit', 'referenced'],
       source: options.hookInject ? 'run-context-hook' : 'run-context',
       sessionId: lane.target?.sessionId ?? resolvedTarget?.sessionId ?? requirementGate?.sessionId ?? null,
-      promptPreview: options.message,
+      promptPreview: effectiveMessage,
     }).catch(() => null)
     : null;
   const knowledgeStageBump = {
@@ -1806,7 +1965,7 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     ...skill,
     adoption: skill.adoption
       ? {
-        ...skill.adoption,
+          ...skill.adoption,
         hitCount: Number(skill.adoption.hitCount ?? 0) + knowledgeStageBump.hitCount,
         referencedCount: Number(skill.adoption.referencedCount ?? 0) + knowledgeStageBump.referencedCount,
         injectedCount: Number(skill.adoption.injectedCount ?? 0) + knowledgeStageBump.injectedCount,
@@ -1878,9 +2037,12 @@ async function buildRunContext(projectRoot, dependencies, options = {}) {
     recommendation: effectiveRecommendation,
     knowledgeSkills: {
       matched: renderedKnowledgeSkills,
+      mandatoryCheck: knowledgeSkillMatches.mandatoryCheck ?? null,
       summary: {
         matched: renderedKnowledgeSkills.length,
         hookInjected: Boolean(options.hookInject && renderedKnowledgeSkills.length > 0),
+        reviewRequired: Boolean(knowledgeSkillMatches.mandatoryCheck?.required),
+        reviewMode: knowledgeSkillMatches.mandatoryCheck?.mode ?? null,
         adoption: knowledgeAdoption?.summary ?? null,
       },
     },

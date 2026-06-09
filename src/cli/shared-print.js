@@ -29,6 +29,12 @@ function printKnowledgeReview(knowledgeReview) {
     console.log(`项目经验回顾: 失败 (${knowledgeReview.errors?.[0] ?? 'unknown'})`);
     return;
   }
+  const userFacingMessage = String(knowledgeReview.userFacingExperience?.message ?? '').trim();
+  if (userFacingMessage) {
+    console.log('项目经验回顾:');
+    console.log(userFacingMessage);
+    return;
+  }
   console.log(`项目经验草案: ${knowledgeReview.candidateId}`);
   if (knowledgeReview.summary) {
     console.log(`摘要: ${knowledgeReview.summary}`);
@@ -51,17 +57,42 @@ function knowledgeAdoptionLabel(adoption = {}) {
   return `命中 ${adoption.hitCount ?? 0} / 引用 ${adoption.referencedCount ?? 0} / 注入 ${adoption.injectedCount ?? 0}`;
 }
 
+function formatUseWhenLabel(value) {
+  return String(value ?? '').trim().replace(/^use when\b[:：]?\s*/i, '').trim();
+}
+
 function printKnowledgeSkillMatches(knowledgeSkills) {
   const matched = Array.isArray(knowledgeSkills?.matched) ? knowledgeSkills.matched : [];
   if (matched.length === 0) {
     return;
   }
   const summary = knowledgeSkills?.summary ?? {};
-  console.log(`项目级 Skill: 命中 ${matched.length} 个${summary.hookInjected ? '，已自动注入当前上下文' : ''}`);
+  const mandatoryCheck = knowledgeSkills?.mandatoryCheck ?? null;
+  if (mandatoryCheck?.required) {
+    console.log(`项目级经验候选: 找到 ${matched.length} 条${summary.hookInjected ? '，已加入当前上下文供判断' : ''}`);
+    console.log(`${mandatoryCheck.title}: ${mandatoryCheck.summary}`);
+    for (const instruction of (mandatoryCheck.instructions ?? []).slice(0, 3)) {
+      console.log(`- ${instruction}`);
+    }
+    if (Array.isArray(mandatoryCheck.focusSignals) && mandatoryCheck.focusSignals.length > 0) {
+      console.log(`当前判断线索: ${mandatoryCheck.focusSignals.join('；')}`);
+    }
+  } else {
+    console.log(`项目级 Skill: 命中 ${matched.length} 个${summary.hookInjected ? '，已自动注入当前上下文' : ''}`);
+  }
   for (const skill of matched.slice(0, 3)) {
     console.log(`- ${skill.skillName}: ${skill.matchSummary ?? '命中当前上下文'}`);
-    if (skill.description) {
+    const useWhen = formatUseWhenLabel(skill.useWhen ?? skill.description);
+    if (useWhen) {
+      console.log(`  适用时机: ${useWhen}`);
+    } else if (skill.description) {
       console.log(`  说明: ${skill.description}`);
+    }
+    if (Array.isArray(skill.reviewFirst) && skill.reviewFirst.length > 0) {
+      console.log(`  先看: ${skill.reviewFirst.slice(0, 3).join('；')}`);
+    }
+    if (Array.isArray(skill.antiPatterns) && skill.antiPatterns.length > 0) {
+      console.log(`  不要直接套用: ${skill.antiPatterns.slice(0, 2).join('；')}`);
     }
     if (Array.isArray(skill.touchedFiles) && skill.touchedFiles.length > 0) {
       console.log(`  相关文件: ${skill.touchedFiles.slice(0, 4).join('；')}`);

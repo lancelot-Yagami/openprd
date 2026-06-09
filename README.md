@@ -211,7 +211,7 @@ openprd init /path/to/project --template-pack agent
 npx @openprd/cli@latest init /path/to/project --template-pack agent
 ```
 
-`init` 会创建 `.openprd/`、`docs/basic/`、`AGENTS.md`，并生成 Codex / Claude / Cursor 三端引导。Codex 项目会同时写入 `.codex/config.toml`、`.codex/hooks.json`、`.codex/hooks/openprd-hook.mjs`，并开启用户级 Codex `codex_hooks = true`。
+`init` 会创建 `.openprd/`、`docs/basic/`、`AGENTS.md`，并生成 Codex / Claude / Cursor 三端引导。Codex 项目会同时写入 `.codex/config.toml`、`.codex/hooks.json`、`.codex/hooks/openprd-hook.mjs`，并开启用户级 Codex `hooks = true`。
 
 Codex hooks 默认使用 `lite` 模式：安装 `UserPromptSubmit`、轻量
 `PreToolUse` 写入门禁，以及轻量 `Stop` 收工回顾。明确提到 OpenPrd、PRD、深度调研、深度对标、复刻、
@@ -557,7 +557,7 @@ openprd loop /path/to/project --run --agent codex --dry-run
 
 - `AGENTS.md` 中的 OpenPrd 管理规则
 - `.codex/skills/`、`.codex/prompts/`、`.codex/config.toml`、`.codex/hooks.json` 和 `.codex/hooks/openprd-hook.mjs`
-- 用户级 Codex config 的 `features.codex_hooks = true`
+- 用户级 Codex config 的 `features.hooks = true`
 - `.claude/skills/`、`.claude/commands/openprd/` 和 `CLAUDE.md`
 - `.cursor/rules/openprd.mdc` 和 `.cursor/commands/`
 - `.openprd/harness/install-manifest.json`、`hook-state.json`、`events.jsonl`、`drift-report.json` 和 `visual-reviews/`
@@ -586,7 +586,7 @@ PreToolUse 写入门禁，并把匹配范围限制在直接编辑工具上，同
 Codex 或 Claude 会话只处理这一个任务。每个任务完成后必须先自测，失败就修复并
 重新自测；前端界面任务在 Codex 客户端优先用 Computer Use，在 Codex CLI 和
 Claude Code 中优先用 Playwright、MCP 浏览器自动化或项目已有 e2e 工具。验证
-通过后，`loop --finish` 会写入阶段性测试报告，并可为该任务生成独立 commit。
+通过后，`loop --finish` 会写入阶段性测试报告，并可在隔离 worktree 中为该任务生成独立 commit。
 界面任务完成前必须运行 `openprd visual-compare`：已有参考图时截实现图并走
 `--reference/--actual`，没有参考图但改动界面时先留修改前截图、完成后留修改后截图并走
 `--before/--after`，查看左右对比 JPG 后才能完成任务。
@@ -607,12 +607,15 @@ openprd loop . --plan --change <change-id>
 openprd loop . --next
 openprd loop . --prompt --agent codex
 openprd loop . --run --agent codex --dry-run
+openprd loop . --run --agent codex --worktree ../openprd-loop-wt --branch loop/feature-x --dry-run
 openprd loop . --run --agent claude --dry-run
 openprd loop . --verify --item T001.01
-openprd loop . --finish --item T001.01 --commit --message "新增版本说明入口"
+openprd loop . --finish --item T001.01 --worktree ../openprd-loop-wt --branch loop/feature-x --commit --message "新增版本说明入口"
 ```
 
-如果项目启用了 `release` 版本轨道，`loop --finish --commit` 会在成功提交后把当前任务的短文案累计到当前项目版本下，并尝试把同名本地 tag（例如 `0.1.23`）移动到最新 commit。若远端已存在同名 tag，OpenPrd 会提示风险并跳过本地 tag 改写，不会静默覆盖远端历史。
+如果项目启用了 `release` 版本轨道，`loop --finish --commit` 会在成功提交时把当前任务的短文案累计到当前项目版本下，并尝试把同名本地 tag（例如 `0.1.23`）移动到最新 commit。若远端已存在同名 tag，OpenPrd 会提示风险并跳过本地 tag 改写，不会静默覆盖远端历史。
+
+主工作区已经有未纳入本任务提交的改动时，`loop --finish --commit` 默认会阻断，提示你改用 `--worktree <path> --branch <name>`；只有你明确知道要在主工作区做 scoped commit 时，才显式加 `--allow-dirty-main`。提交范围也不再是 `git add -A`，而是按任务 `write-scope`、任务来源文件和本轮新增 touched files 收窄，避免把无关改动卷进单任务 commit。
 
 Loop 状态会沉淀在 `.openprd/harness/`：
 
@@ -620,11 +623,11 @@ Loop 状态会沉淀在 `.openprd/harness/`：
 - `feature-list.json`：每个任务都会带一个人类可读的 `taskHandle`，例如
   `change-id:T001.01:task-title`，方便跨对话继续同一任务，而不是只靠聊天 UUID
 - `progress.md`：给人看的进度记录
-- `agent-sessions.jsonl`：每次 prompt / run / finish 的结构化事件，也会记录任务句柄和任务标题
+- `agent-sessions.jsonl`：每次 prompt / run / finish 的结构化事件，也会记录任务句柄、任务标题、worktree 路径、分支和 commit sha
 - `bootstrap.sh`：每个新会话启动时执行的检查脚本
-- `loop-state.json`：当前任务 id、任务句柄、任务标题，以及最近一次 Agent 会话状态
+- `loop-state.json`：当前任务 id、任务句柄、任务标题、baseline 脏文件，以及最近一次 worktree / 分支 / commit 状态
 - `loop-prompts/`：生成过的单任务提示词，便于审计和复用
-- `test-reports/`：每个任务的阶段性测试报告，会和任务改动一起提交
+- `test-reports/`：每个任务的阶段性测试报告，供审查、回归和后续会话复用
 
 建议先用 `--dry-run`，让 OpenPrd 生成提示词和准确执行命令，但不直接启动 Agent。
 `--agent codex` / `--agent claude` 会使用默认 CLI 集成；只有需要接入团队自定义

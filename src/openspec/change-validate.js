@@ -210,6 +210,7 @@ export async function validateOpenSpecChangeWorkspace(projectRoot, options = {})
     optional: !(await exists(cjoin(projectRoot, '.openprd'))),
     sourceManuals: options.sourceManuals,
     docsContent: options.docsContent,
+    folderManualModuleName: options.folderManualModuleName,
   });
   if (!standards.skipped) {
     errors.push(...standards.errors);

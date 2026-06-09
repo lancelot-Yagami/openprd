@@ -1,5 +1,5 @@
 {
-  "activeChange": "adaptive-project-framing",
+  "activeChange": "loop-isolated-worktree-commit",
   "taskSharding": {
     "maxItemsPerFile": 25,
     "handoffRequired": true,

@@ -170,6 +170,10 @@ function normalizeSkillIndexEntry(entry = {}) {
     ]),
     categories: normalizeStringList(skill.categories),
     triggerHints: normalizeStringList(skill.triggerHints),
+    useWhen: firstString(skill.useWhen, skill.use_when),
+    applicability: normalizeStringList(skill.applicability),
+    antiPatterns: normalizeStringList(skill.antiPatterns),
+    reviewFirst: normalizeStringList(skill.reviewFirst),
     touchedFiles: normalizeStringList(skill.touchedFiles),
     evidencePaths: normalizeStringList(skill.evidencePaths),
     rootCauseLabels: normalizeStringList(skill.rootCauseLabels),
@@ -211,6 +215,37 @@ function normalizeSearchTokens(value) {
 
 function sortByLength(items = []) {
   return [...items].sort((left, right) => String(right).length - String(left).length);
+}
+
+function isGenericKnowledgeDescription(value) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) {
+    return true;
+  }
+  return [
+    '自动沉淀的项目级排查经验',
+    '待确认项目经验草案',
+    '自动生成的待确认项目经验草案',
+    '项目级排查经验',
+    '项目经验草案',
+  ].some((needle) => normalized.includes(normalizeSearchText(needle)));
+}
+
+function stripUseWhenPrefix(value) {
+  return String(value ?? '').trim().replace(/^use when\b[:：]?\s*/i, '').trim();
+}
+
+function deriveSkillUseWhen({ useWhen, description, applicability = [], triggerHints = [] }) {
+  const explicit = firstString(useWhen);
+  if (explicit) {
+    return explicit;
+  }
+  const desc = firstString(description);
+  if (desc && !isGenericKnowledgeDescription(desc)) {
+    return desc;
+  }
+  const fallback = firstString(applicability[0], triggerHints[0], desc);
+  return fallback ? `Use when ${stripUseWhenPrefix(fallback)}` : null;
 }
 
 function scoreQueryAgainstFields(queryText, queryTokens, fields = []) {
@@ -264,22 +299,47 @@ function parseMarkdownSectionList(markdown, headings = []) {
   return uniq(collected);
 }
 
-function parseSkillMetadataFromText(markdown) {
+function parseFrontmatterValue(markdown, key) {
   const text = String(markdown ?? '');
   const frontmatter = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
-  const descriptionLine = frontmatter?.[1]
-    ?.split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('description:'));
-  const description = descriptionLine ? descriptionLine.replace(/^description:\s*/, '').trim() : null;
-  const triggerHints = parseMarkdownSectionList(text, ['触发场景', '常见误判', '先看什么', '收尾顺序', '反模式', '下次触发时先看什么']);
-  const rootCauseLabels = parseMarkdownSectionList(text, ['可复用模式']);
+  if (!frontmatter) {
+    return null;
+  }
+  const pattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.+?)\\s*$`);
+  const line = frontmatter[1]
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find((item) => pattern.test(item));
+  if (!line) {
+    return null;
+  }
+  const match = line.match(pattern);
+  return match?.[1]?.trim() ?? null;
+}
+
+function parseSkillMetadataFromText(markdown) {
+  const text = String(markdown ?? '');
+  const description = parseFrontmatterValue(text, 'description');
+  const useWhen = firstString(
+    parseFrontmatterValue(text, 'use_when'),
+    parseFrontmatterValue(text, 'use-when'),
+    /^use when\b/i.test(String(description ?? '')) ? description : null,
+  );
+  const triggerHints = parseMarkdownSectionList(text, ['触发场景', '触发条件', '同步触发条件', '收尾顺序']);
+  const applicability = parseMarkdownSectionList(text, ['适用范围', '适用时机', 'When to Use', 'When to use']);
+  const antiPatterns = parseMarkdownSectionList(text, ['不要直接套用', '不要在这些情况使用', '不要在这些情况直接套用', 'When Not to Use', 'Do Not Use When', '反模式', '常见误判']);
+  const reviewFirst = parseMarkdownSectionList(text, ['下次触发时先看什么', '先看什么', '先看哪些证据', '判断前先看', '排查顺序']);
+  const rootCauseLabels = parseMarkdownSectionList(text, ['可复用模式', '常见根因']);
   const evidencePaths = uniq((text.match(/`([^`]+)`/g) ?? [])
     .map((entry) => entry.replace(/`/g, '').trim())
     .filter((entry) => entry.includes('/') || entry.endsWith('.md') || entry.endsWith('.js') || entry.endsWith('.ts')));
   return {
     description,
+    useWhen,
     triggerHints,
+    applicability,
+    antiPatterns,
+    reviewFirst,
     rootCauseLabels,
     evidencePaths,
   };
@@ -377,6 +437,18 @@ async function hydrateKnowledgeSkillEntry(projectRoot, entry, cache = new Map())
       ...parsedSkill.triggerHints,
       ...candidateBundles.flatMap((bundle) => bundle.triggerHints),
     ]).slice(0, 24),
+    applicability: uniq([
+      ...current.applicability,
+      ...parsedSkill.applicability,
+    ]).slice(0, 24),
+    antiPatterns: uniq([
+      ...current.antiPatterns,
+      ...parsedSkill.antiPatterns,
+    ]).slice(0, 24),
+    reviewFirst: uniq([
+      ...current.reviewFirst,
+      ...parsedSkill.reviewFirst,
+    ]).slice(0, 24),
     touchedFiles: uniq([
       ...current.touchedFiles,
       ...candidateBundles.flatMap((bundle) => bundle.touchedFiles),
@@ -391,6 +463,19 @@ async function hydrateKnowledgeSkillEntry(projectRoot, entry, cache = new Map())
       ...parsedSkill.rootCauseLabels,
       ...candidateBundles.flatMap((bundle) => bundle.rootCauseLabels),
     ]).slice(0, 24),
+    useWhen: deriveSkillUseWhen({
+      useWhen: current.useWhen ?? parsedSkill.useWhen,
+      description: current.description ?? parsedSkill.description,
+      applicability: uniq([
+        ...current.applicability,
+        ...parsedSkill.applicability,
+      ]),
+      triggerHints: uniq([
+        ...current.triggerHints,
+        ...parsedSkill.triggerHints,
+        ...candidateBundles.flatMap((bundle) => bundle.triggerHints),
+      ]),
+    }),
     description: current.description ?? parsedSkill.description,
     summary: current.summary ?? candidateBundles.map((bundle) => bundle.summary).find(Boolean) ?? null,
     adoption: normalizeSkillAdoption(current.adoption),
@@ -706,12 +791,22 @@ function buildKnowledgeAbstraction({
     verificationSteps[0] ? `验证结论: ${verificationSteps[0]}` : null,
     '可复用的验证链路与收尾动作',
   ]).slice(0, 6);
+  const antiPatterns = uniq([
+    '如果只是文件名、路径或个别词相似，但当前目标和验证方式不同，不要直接套用。',
+    source.kind === 'quality-report'
+      ? '如果当前任务还没进入验证或收尾阶段，不要把这条经验当成通用实现模板。'
+      : '如果当前问题没有出现相似症状、事件或证据入口，不要因为改到相似模块就直接照搬旧结论。',
+    source.evidenceSources.length > 0
+      ? '如果本轮已经有更新的现场证据，先核对新证据，再决定是否复用旧经验。'
+      : null,
+  ]).slice(0, 4);
   return {
     triggerConditions,
     applicability,
     verificationSteps,
     typicalInputs,
     typicalOutputs,
+    antiPatterns,
   };
 }
 
@@ -943,9 +1038,11 @@ function renderKnowledgeDraftSkill({ skillName, candidate, source, relativeCandi
     ...candidate.touchedFiles.map((file) => `\`${file}\``),
     ...source.evidenceSources.map((item) => `\`${item.path}\``),
   ]);
+  const useWhen = 'Use when the current task overlaps this draft project experience and you should verify fit before reusing it.';
   return `---
 name: ${skillName}
-description: OpenPrd 在本轮回顾时自动生成的待确认项目经验草案。
+description: ${useWhen}
+use_when: ${useWhen}
 ---
 
 # ${skillName}
@@ -973,6 +1070,10 @@ ${renderList(abstraction.typicalOutputs ?? [], '至少产出 knowledge candidate
 ## 下次触发时先看什么
 
 ${renderList(inspectItems, '先看本轮 touched files 和已有诊断证据。')}
+
+## 不要直接套用
+
+${renderList(abstraction.antiPatterns ?? [], '如果只是文件名相似，但当前目标、阶段或验证方式不同，不要直接套用。')}
 
 ## 可复用模式
 
@@ -1601,6 +1702,54 @@ function buildKnowledgeMatchQuery(options = {}) {
   };
 }
 
+function trimPromptList(items = [], limit = 3, max = 96) {
+  return uniq(
+    normalizeStringList(items)
+      .map((item) => trimPreview(item, max))
+      .filter(Boolean),
+  ).slice(0, limit);
+}
+
+function buildKnowledgeMatchCandidateCard(skill) {
+  return {
+    skillName: skill.skillName,
+    useWhen: firstString(skill.useWhen, skill.description),
+    applicability: trimPromptList(skill.applicability, 2, 96),
+    reviewFirst: trimPromptList(skill.reviewFirst, 3, 96),
+    antiPatterns: trimPromptList(skill.antiPatterns, 2, 96),
+    touchedFiles: trimPromptList(skill.touchedFiles, 4, 80),
+    matchedOn: trimPromptList(skill.matchedOn, 3, 96),
+    matchSummary: trimPreview(skill.matchSummary, 160),
+  };
+}
+
+function buildKnowledgeMandatoryCheck(matches, options = {}) {
+  if (!Array.isArray(matches) || matches.length === 0) {
+    return null;
+  }
+  const focusSignals = trimPromptList([
+    options.recommendationTitle ? `当前目标: ${options.recommendationTitle}` : null,
+    options.recommendationReason ? `目标原因: ${options.recommendationReason}` : null,
+    options.activeChange ? `当前变更: ${options.activeChange}` : null,
+    options.nextTaskTitle ? `下一任务: ${options.nextTaskTitle}` : null,
+    ...normalizeStringList(options.relatedFiles).map((file) => `相关文件: ${file}`),
+  ], 6, 120);
+  return {
+    required: true,
+    mode: 'prompt-rerank',
+    title: '先做项目经验检查，再决定是否复用',
+    summary: '这些项目经验只是候选，不代表都要复用；先按当前目标、阶段和验证方式判断。',
+    instructions: [
+      '先判断当前任务真正要解决什么，再看候选经验。',
+      '只有当适用时机、范围或证据入口与当前任务一致时，才复用对应经验。',
+      '如果只是文件名、路径或个别词重合，但任务目标、阶段或验证方式不一致，就不要套用。',
+      '最多选择 0 到 3 条最相关经验；如果都不贴切，可以明确本轮不复用项目经验。',
+    ],
+    focusSignals,
+    candidates: matches.map((skill) => buildKnowledgeMatchCandidateCard(skill)).slice(0, Math.max(1, Number(options.limit ?? 3))),
+  };
+}
+
 function scoreKnowledgeSkillMatch(skill, query) {
   const fileHints = uniq([
     ...skill.touchedFiles,
@@ -1610,10 +1759,13 @@ function scoreKnowledgeSkillMatch(skill, query) {
   ]);
   const fields = [
     skill.skillName,
-    skill.description,
+    skill.useWhen,
+    ...(!isGenericKnowledgeDescription(skill.description) ? [skill.description] : []),
     skill.summary,
     ...skill.categories,
     ...skill.triggerHints,
+    ...skill.applicability,
+    ...skill.reviewFirst,
     ...skill.rootCauseLabels,
     ...fileHints,
   ];
@@ -1658,14 +1810,18 @@ export async function resolveKnowledgeSkillMatches(projectRoot, options = {}) {
     .filter(Boolean)
     .sort((left, right) => right.score - left.score || left.skillName.localeCompare(right.skillName))
     .slice(0, Math.max(1, Number(options.limit ?? 3)));
+  const mandatoryCheck = buildKnowledgeMandatoryCheck(matches, options);
   return {
     ok: true,
     action: 'knowledge-match',
     projectRoot,
     query: trimPreview(query.text, 320),
     matched: matches,
+    mandatoryCheck,
     summary: {
       matched: matches.length,
+      reviewRequired: Boolean(mandatoryCheck?.required),
+      reviewMode: mandatoryCheck?.mode ?? null,
     },
   };
 }

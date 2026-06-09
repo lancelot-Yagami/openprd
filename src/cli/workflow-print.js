@@ -76,6 +76,22 @@ function printReviewResult(result, json) {
   }
 }
 
+function printBrainstormResult(result, json) {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log('脑暴工作台已生成');
+  console.log(`主题: ${result.record.topic}`);
+  console.log(`推荐方向: ${result.record.summary?.recommendedDirection ?? '待补充'}`);
+  console.log(`脑暴页面: ${result.htmlPath}`);
+  console.log(`Markdown 数据源: ${result.markdownPath}`);
+  console.log(`Capture Patch: ${result.patchPath}`);
+  console.log(`状态文件: ${result.statePath}`);
+  console.log(`已自动打开: ${result.opened ? '是' : '否'}`);
+}
+
 function printHistoryResult(result, json) {
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -120,6 +136,10 @@ function printNextResult(result, json) {
   console.log(`完成度: ${analysis.completedRequiredFields}/${analysis.totalRequiredFields}`);
   if (taskGraph?.nextReadyNode) {
     console.log(`下一个就绪节点: ${taskGraph.nextReadyNode}`);
+  }
+  if (result.brainstormSuggestion?.recommended) {
+    console.log(`脑暴模式建议: ${result.brainstormSuggestion.reason}`);
+    console.log(`脑暴命令: ${result.brainstormSuggestion.suggestedCommand}`);
   }
   if (result.diagramState?.needed) {
     console.log(`图表门禁: ${result.diagramState.shouldGateFreeze ? '激活' : '已满足'}`);
@@ -184,6 +204,7 @@ function printHandoffResult(result, json) {
 }
 
 export {
+  printBrainstormResult,
   printSynthesizeResult,
   printReviewResult,
   printHistoryResult,

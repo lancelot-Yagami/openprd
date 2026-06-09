@@ -239,6 +239,15 @@ export function buildPrdSnapshot(ws, options = {}) {
       successMetrics: normalizeArray(pickValue(options.successMetrics, state.successMetrics)),
       acceptanceGoals: normalizeArray(pickValue(options.acceptanceGoals, state.acceptanceGoals)),
     },
+    validation: {
+      community: normalizeArray(pickValue(options.community, state.community)),
+      seedUsers: normalizeArray(pickValue(options.seedUsers, state.seedUsers)),
+      currentAlternative: pickValue(options.currentAlternative, state.currentAlternative, state.asIs),
+      manualPath: normalizeArray(pickValue(options.manualPath, state.manualPath)),
+      commitmentSignals: normalizeArray(pickValue(options.commitmentSignals, state.commitmentSignals)),
+      firstValidationStep: pickValue(options.firstValidationStep, state.firstValidationStep, state.nextStep),
+      defaultAlivePlan: normalizeArray(pickValue(options.defaultAlivePlan, state.defaultAlivePlan)),
+    },
     scope: {
       inScope: normalizeArray(pickValue(options.inScope, state.inScope)),
       outOfScope: normalizeArray(pickValue(options.outOfScope, state.outOfScope)),
@@ -366,6 +375,15 @@ export function renderPrdMarkdown(snapshot) {
       ['目标', sections.goals.goals],
       ['成功指标', sections.goals.successMetrics],
       ['验收目标', sections.goals.acceptanceGoals],
+    ]),
+    renderSection('验证与创业闭环', [
+      ['可触达社区', sections.validation.community],
+      ['第一批种子用户', sections.validation.seedUsers],
+      ['当前替代方案', sections.validation.currentAlternative],
+      ['手工交付路径', sections.validation.manualPath],
+      ['承诺信号', sections.validation.commitmentSignals],
+      ['首个低成本验证', sections.validation.firstValidationStep],
+      ['先活下来方案', sections.validation.defaultAlivePlan],
     ]),
     renderSection('范围与非目标', [
       ['范围内', sections.scope.inScope],

@@ -101,19 +101,26 @@ async function seedKnowledgeSkill(project, skillName = 'billing-trace-rollback')
   await fs.writeFile(skillPath, [
     '---',
     `name: ${skillName}`,
-    'description: 当处理 billing-api.js、traceId 透传或 webhook 回滚时，先复用这份项目级排查经验。',
+    'description: Use when the current task touches billing-api.js, traceId propagation, or webhook rollback and should reuse this verified project diagnosis path.',
+    'use_when: Use when the current task touches billing-api.js, traceId propagation, or webhook rollback and should reuse this verified project diagnosis path.',
     '---',
     '',
     `# ${skillName}`,
     '',
-    '## 触发场景',
+    '## 触发条件',
     '- 修改 `src/billing-api.js`',
     '- 处理 traceId 透传',
     '- 修 webhook 回滚',
     '',
+    '## 适用范围',
+    '- 适用于支付链路里 traceId 透传、回滚修复和 webhook 对账排查。',
+    '',
     '## 先看什么',
     '- `src/billing-api.js`',
     '- `docs/basic/backend-structure.md`',
+    '',
+    '## 不要直接套用',
+    '- 如果当前任务只是同仓库里的别的支付逻辑改动，不要因为文件名相似就套用。',
     '',
     '## 可复用模式',
     '- 先确认 traceId 在 API 和 webhook 链路里一致透传',
@@ -193,6 +200,8 @@ test('run exposes hook-stable context and records hook iterations', async () => 
   assert.equal(continuationContext.lane.target.changeId, null);
   assert.equal(continuationContext.recommendation.type, 'session-continuation');
   assert.equal(continuationContext.recommendation.continuationTarget.sessionId, '019e5ac7-088b-7ff2-86d1-4c026ff68105');
+  assert.equal(continuationContext.recommendation.isolation.required, false);
+  assert.equal(continuationContext.recommendation.isolation.worktreeRecommended, false);
   assert.ok(continuationContext.recommendation.reason.includes('工具无关的会话 ID'));
   assert.ok(continuationContext.recommendation.reason.includes('不能用相似历史、当前 active change'));
   assert.equal(continuationContext.recommendation.reason.includes('存在一个依赖已就绪的 OpenPrd 任务'), false);
@@ -235,6 +244,7 @@ test('run exposes hook-stable context and records hook iterations', async () => 
   assert.ok(continuationLogs.some((line) => line.includes('当前处理路径: 继续已有任务')));
   assert.equal(continuationLogs.some((line) => line.includes('下一步类型: session-continuation')), false);
   assert.ok(continuationLogs.some((line) => line.includes('会话 ID')));
+  assert.equal(continuationLogs.some((line) => line.includes('环境建议:')), false);
 
   const bareSessionContext = await runWorkspace(project, {
     context: true,
@@ -289,8 +299,14 @@ test('run context auto-matches project knowledge skills and records adoption', a
   });
   assert.equal(context.knowledgeSkills.summary.matched, 1);
   assert.equal(context.knowledgeSkills.summary.hookInjected, false);
+  assert.equal(context.knowledgeSkills.summary.reviewRequired, true);
+  assert.equal(context.knowledgeSkills.summary.reviewMode, 'prompt-rerank');
   assert.equal(context.knowledgeSkills.matched[0].skillName, 'billing-trace-rollback');
   assert.match(context.knowledgeSkills.matched[0].matchSummary, /traceId|billing-api|webhook/i);
+  assert.match(context.knowledgeSkills.matched[0].useWhen, /billing-api\.js|traceId propagation|webhook rollback/i);
+  assert.equal(context.knowledgeSkills.mandatoryCheck.mode, 'prompt-rerank');
+  assert.equal(context.knowledgeSkills.mandatoryCheck.required, true);
+  assert.equal(context.knowledgeSkills.mandatoryCheck.candidates[0].skillName, 'billing-trace-rollback');
 
   const knowledgeIndex = JSON.parse(await fs.readFile(path.join(project, '.openprd', 'knowledge', 'index.json'), 'utf8'));
   assert.equal(knowledgeIndex.skills[0].adoption.hitCount, 1);
@@ -305,7 +321,8 @@ test('run context auto-matches project knowledge skills and records adoption', a
   } finally {
     console.log = originalLog;
   }
-  assert.ok(logs.some((line) => line.includes('项目级 Skill: 命中 1 个')));
+  assert.ok(logs.some((line) => line.includes('项目级经验候选: 找到 1 条')));
+  assert.ok(logs.some((line) => line.includes('先做项目经验检查')));
   assert.ok(logs.some((line) => line.includes('billing-trace-rollback')));
 });
 
@@ -396,6 +413,16 @@ test('run context recommends parallel workers before the isolated loop threshold
   assert.ok(context.recommendation.parallelPlan.groups.includes('implementation') || context.recommendation.parallelPlan.groups.includes('contracts'));
   assert.ok(context.recommendation.preparationCommand.includes('openprd loop . --plan --change'));
   assert.ok(context.recommendation.reason.includes('分头推进'));
+
+  const isolatedContext = await runWorkspace(project, {
+    context: true,
+    message: '请放到单独环境里继续当前任务',
+  });
+  assert.equal(isolatedContext.recommendation.type, 'task');
+  assert.equal(isolatedContext.recommendation.executionMode, 'parallel-workers');
+  assert.equal(isolatedContext.recommendation.parallelPlan.worktreeRecommended, true);
+  assert.equal(isolatedContext.recommendation.loop.worktreeRecommended, true);
+  assert.ok(isolatedContext.recommendation.reason.includes('明确要求按单独环境继续'));
 });
 
 test('run context prioritizes active requirement intake over historical active change tasks', async () => {
@@ -683,10 +710,19 @@ test('run context resolves cross-workspace session continuation through the glob
   assert.equal(context.recommendation.changeId, 'resource-layer-public-model-api');
   assert.equal(context.recommendation.command, `openprd run '${projectB}' --context --message '${sessionId}'`);
   assert.equal(context.recommendation.isolation.required, true);
-  assert.equal(context.recommendation.isolation.worktreeRecommended, true);
+  assert.equal(context.recommendation.isolation.worktreeRecommended, false);
   assert.ok(context.recommendation.reason.includes('全局 session registry'));
   assert.ok(context.recommendation.reason.includes(`该会话归属到工作区 ${projectB}`));
   assert.ok(context.recommendation.reason.includes('不能继续复用当前工作区的 active 状态'));
+
+  const isolatedContext = await runWorkspace(projectA, {
+    context: true,
+    message: `请放到单独环境里继续这个 Codex 任务：${sessionId}`,
+  });
+  assert.equal(isolatedContext.recommendation.type, 'session-continuation');
+  assert.equal(isolatedContext.recommendation.isolation.required, true);
+  assert.equal(isolatedContext.recommendation.isolation.worktreeRecommended, true);
+  assert.ok(isolatedContext.recommendation.isolation.reason.includes('明确要求'));
 });
 
 test('run verify validates the focused change instead of the global active change', async () => {

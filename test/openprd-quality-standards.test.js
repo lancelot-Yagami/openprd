@@ -69,6 +69,7 @@ import {
   verifyLoopWorkspace,
   verifyQualityWorkspace,
   visualCompareWorkspace,
+  visualPrepareWorkspace,
   archiveKnowledgeCandidate,
   listKnowledgeCandidates,
   rejectKnowledgeCandidate,
@@ -179,10 +180,12 @@ test('quality verify writes html eval report and learn creates experience skill'
   assert.doesNotMatch(learned.skillName, /eval-/);
   assert.doesNotMatch(learned.skillName, /candidate-eval-/);
   const skill = await fs.readFile(learned.files.skill, 'utf8');
+  assert.match(skill, /description:\s*Use when /);
   assert.ok(skill.includes('## 触发条件'));
   assert.ok(skill.includes('## 适用范围'));
   assert.ok(skill.includes('## 典型输入'));
   assert.ok(skill.includes('## 典型输出'));
+  assert.ok(skill.includes('## 不要直接套用'));
   assert.ok(skill.includes('## 关联字段'));
   assert.ok(skill.includes('## 先看哪些证据'));
   assert.doesNotMatch(skill, /\.openprd\/quality\/reports\//);
@@ -1316,6 +1319,103 @@ test('dev-check wrap-up copy validate mode fails fast on overlong fields', () =>
   assert.match(run.stderr, /预警原因/);
   assert.match(run.stderr, /超过 20 字上限/);
   assert.match(run.stderr, /请缩短后重试/);
+});
+
+test('visual-prepare writes reference-set crops, contact sheet, and board templates', async () => {
+  const project = await makeTempProject();
+  await initWorkspace(project, { templatePack: 'consumer' });
+  const reference = path.join(project, 'reference-board.png');
+
+  await sharp({
+    create: {
+      width: 400,
+      height: 240,
+      channels: 3,
+      background: '#1d4ed8',
+    },
+  }).png().toFile(reference);
+
+  const result = await visualPrepareWorkspace(project, {
+    reference,
+    grid: '2x2',
+    include: '01,04',
+    title: '登录候选图',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, 'grid');
+  assert.equal(result.itemCount, 2);
+  assert.ok(result.referenceSetPath.includes(path.join('.openprd', 'harness', 'visual-reviews', 'reference-sets')));
+  assert.equal((await sharp(result.contactSheetPath).metadata()).format, 'jpeg');
+
+  const referenceSet = JSON.parse(await fs.readFile(result.referenceSetPath, 'utf8'));
+  assert.equal(referenceSet.schema, 'openprd.reference-set.v1');
+  assert.deepEqual(referenceSet.selection.grid, { columns: 2, rows: 2 });
+  assert.equal(referenceSet.items.length, 2);
+  assert.deepEqual(referenceSet.items.map((item) => item.id), ['01', '04']);
+  assert.ok(referenceSet.artifacts.comparePlan.endsWith('compare-plan.json'));
+
+  const focusBoard = JSON.parse(await fs.readFile(result.focusBoardTemplatePath, 'utf8'));
+  assert.equal(focusBoard.mode, 'focus-board');
+  assert.equal(focusBoard.focusRegions.length, 2);
+  assert.equal(focusBoard.left.path, referenceSet.source.stagedPath);
+
+  const parallelBoard = JSON.parse(await fs.readFile(result.parallelBoardTemplatePath, 'utf8'));
+  assert.equal(parallelBoard.mode, 'parallel-board');
+  assert.equal(parallelBoard.items.length, 2);
+  assert.equal(parallelBoard.items[0].media[0].path, referenceSet.items[0].cropPath);
+
+  const comparePlan = JSON.parse(await fs.readFile(result.comparePlanPath, 'utf8'));
+  assert.equal(comparePlan.schema, 'openprd.visual-prepare.plan.v1');
+  assert.equal(comparePlan.items.length, 2);
+  assert.ok(comparePlan.items[0].suggestedCommand.includes('openprd visual-compare . --reference'));
+
+  const cropMetadata = await sharp(result.items[0].cropPath).metadata();
+  assert.equal(cropMetadata.format, 'png');
+  assert.ok(cropMetadata.width > 0);
+  assert.ok(cropMetadata.height > 0);
+
+  const boxesPlan = path.join(project, 'boxes-plan.json');
+  await fs.writeFile(boxesPlan, `${JSON.stringify({
+    title: '手工映射',
+    summary: '测试 boxes 模式。',
+    items: [
+      {
+        id: 'hero',
+        label: '首屏 Hero',
+        box: { unit: 'ratio', x: 0, y: 0, width: 0.5, height: 0.5 },
+      },
+      {
+        id: 'cta',
+        label: 'CTA 区',
+        box: { unit: 'ratio', x: 0.5, y: 0.5, width: 0.5, height: 0.5 },
+      },
+    ],
+  }, null, 2)}\n`);
+  const cliLogs = [];
+  const originalLog = console.log;
+  console.log = (...args) => cliLogs.push(args.join(' '));
+  try {
+    assert.equal(await main([
+      'visual-prepare',
+      project,
+      '--reference',
+      reference,
+      '--boxes',
+      boxesPlan,
+      '--id',
+      'manual-boxes',
+      '--json',
+    ]), 0);
+  } finally {
+    console.log = originalLog;
+  }
+  const cliResult = JSON.parse(cliLogs.join('\n'));
+  assert.equal(cliResult.mode, 'boxes');
+  assert.equal(cliResult.setId, 'manual-boxes');
+  assert.equal(cliResult.itemCount, 2);
+  const cliReferenceSet = JSON.parse(await fs.readFile(cliResult.referenceSetPath, 'utf8'));
+  assert.equal(cliReferenceSet.selection.boxesPath, 'boxes-plan.json');
+  assert.deepEqual(cliReferenceSet.items.map((item) => item.id), ['hero', 'cta']);
 });
 
 test('visual-compare writes side-by-side review images', async () => {

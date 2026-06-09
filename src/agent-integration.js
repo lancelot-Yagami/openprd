@@ -19,8 +19,8 @@ const OPENPRD_HOOK_PROFILES = {
 };
 const OPENPRD_DEFAULT_HOOK_PROFILE = 'lite';
 const OPENPRD_HOOK_EVENTS_WITH_MATCHER = new Set(['PreToolUse', 'PostToolUse']);
-const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(apply_patch|Write|Edit)$';
-const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|apply_patch|Write|Edit)$';
+const OPENPRD_LITE_WRITE_TOOL_MATCHER = '^(Bash|Read|Write|Edit|MultiEdit|apply_patch|WebSearch|web_search)$';
+const OPENPRD_GUARDED_WRITE_TOOL_MATCHER = '^(Bash|Read|Glob|Grep|LS|Write|Edit|MultiEdit|apply_patch|WebSearch|web_search)$';
 const OPENPRD_HARNESS_DIR = cjoin('.openprd', 'harness');
 const OPENPRD_HARNESS_EVENTS = cjoin(OPENPRD_HARNESS_DIR, 'events.jsonl');
 const OPENPRD_HARNESS_HOOK_STATE = cjoin(OPENPRD_HARNESS_DIR, 'hook-state.json');
@@ -62,14 +62,19 @@ const CANONICAL_SKILLS = [
       '',
       '## 先做什么',
       '',
-      '1. 先读 `.openprd/` 当前状态，并把 `openprd run . --context` 当作建议上下文，而不是自动执行指令。',
-      '2. 需要具体命令时，优先读取 `.openprd/harness/command-catalog.md`，不要把命令清单继续塞回 `AGENTS.md`。',
-      '3. 需要共用约束时，读 `$openprd-shared`；需要主工作流时，读 `$openprd-harness`。',
+      '1. 如果用户当前明确在说“帮我梳理下”“先想清楚”“进入脑暴模式”，先读 `$openprd-requirement-intake`，并优先运行 `openprd run . --context --message <用户原话>`；需要时直接进入 `openprd brainstorm . --open`，不要只跑不带 message 的 `openprd run . --context`。',
+      '2. 其他情况再读 `.openprd/` 当前状态，并把 `openprd run . --context` 当作建议上下文，而不是自动执行指令。',
+      '3. 如果当前是空白工作区的前端/页面冷启动，而且用户已经给了明确的页面主题、模块范围或“直接实现”的意图，优先改用 `openprd run . --context --message <用户原话>`；不要先跑不带 message 的 `openprd run . --context`，再被空白工作区自己的 `clarify-user` 带偏。',
+      '4. 需要具体命令时，优先读取 `.openprd/harness/command-catalog.md`，不要把命令清单继续塞回 `AGENTS.md`。',
+      '5. 需要共用约束时，读 `$openprd-shared`；需要主工作流时，读 `$openprd-harness`。',
+      '6. 任务涉及界面、页面、视觉、样式、信息架构、内容型页面或前端体验时，额外读取 `$openprd-frontend-design`。',
+      '7. 如果这类空白前端任务在带 message 的前提下仍短暂返回 `clarify-user`，但用户原话已经明确要求直接实现单页/首页/原型，就把它当成摘要级提醒；先用 3 到 5 行 mini-plan 收口，再按 frontend design 的 `design-starter -> Patch Mode` 路径继续，不要回到长澄清或模板源码漫游。',
       '',
       '## 路由表',
       '',
       '- 需求入口分流、用户可见需求类型与内部 L0/L1/L2 路由码对照、PRD 场景视角选择：`$openprd-requirement-intake`',
       '- 主工作流、review/change/tasks、`run/loop`：`$openprd-harness`',
+      '- 前端设计框架、审美资产库、主题/骨架/组件/配方/模板、事实与素材前置门：`$openprd-frontend-design`',
       '- 测试策略分流、分层验证和任务级 evidence-plan：`$openprd-test-strategy`',
       '- 最佳实践、benchmark、公开 GitHub 仓库、第三方技术事实、prompt/context engineering：`$openprd-benchmark-router`',
       '- `docs/basic/`、文件说明书、文件夹 README、文档标准：`$openprd-standards`',
@@ -83,6 +88,7 @@ const CANONICAL_SKILLS = [
       '- `AGENTS.md` 只保留轻量入口合同；详细规则放进 repo-local skills、`.openprd/harness/command-catalog.md` 和 hooks。',
       '- 公开 GitHub 仓库架构/对标先 DeepWiki；第三方库、API、SDK、MCP、CLI 用法先查本地证据，本地不足时再按 `resolve_library_id -> query_docs` 使用 Context7。',
       '- hooks 已经强制处理 requirement / research / secrets / skill-visualization / weapp / browser / copy 这些门禁；不要再把它们膨胀回 `AGENTS.md` 静态长文。',
+      '- 用户原话里已经明确要求“先梳理/脑暴”时，用户意图优先于不带 message 的默认 run context；先把原话带进 `openprd run . --context --message ...`，或直接进入脑暴模式。',
       '- 不要用固定关键词决定是否写 PRD，也不要用词表决定工具；先让 `$openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本做语义分流，再按用户目标、期望产物、交付阶段和证据缺口选择学习器、视觉评审或质量收口工具。',
       '- 不要用“需求大小”机械决定测试层级；先让 `$openprd-test-strategy` 按风险、触达面、失败后果和证据成本分流。',
       '',
@@ -140,6 +146,11 @@ const CANONICAL_SKILLS = [
     description: 'OpenPrd 需求入口与 PRD 分流 skill：判断用户可见需求类型和内部 L0/L1/L2 路由码，决定直接澄清、mini-plan 或正式 PRD，并选择通用 / 面向个人消费者场景 / 面向企业服务场景 / 以 Agent 为主要使用场景的 PRD 视角。对用户复述时不要直接把 consumer / b2b / agent 当展示词；这些枚举值只用于内部记录和命令。',
   },
   {
+    id: 'openprd-frontend-design',
+    sourceSkill: 'openprd-frontend-design',
+    description: 'OpenPrd 前端设计框架 skill：为界面、页面、视觉、样式和前端体验任务提供设计资产框架、前置门禁和实现前方向评审规则。',
+  },
+  {
     id: 'openprd-shared',
     description: 'OpenPrd 工作区、语言规则、门禁和 workspace-first 推理的共用守则。',
     body: [
@@ -169,16 +180,19 @@ const CANONICAL_SKILLS = [
       '- 表格优先用于方案对比、状态盘点、问题排查、风险审查、多对象 QA、文件/命令清单、需求场景覆盖和内容/素材规划；单一结论、单一动作、代码示例、命令示例和叙事型说明不要强行表格化。',
       '- 面向用户的时间统一使用上海时区 `YYYY-MM-DD HH:mm:ss` 格式，不带 `T`、`Z` 或毫秒。',
       '- 保持未解决假设可见，不要悄悄补脑。',
+      '- 对于 L2、脑暴或仍在判断值不值得做的 0 到 1 需求，默认再补一层“创业验证闭环”：第一批最容易触达的人群/社区、当前替代方案、先不做完整产品时的手工路径、什么真实承诺才算真需求、最低成本验证动作，以及验证阶段怎样先活下来。',
       '- 项目基线文档路径只能是 `docs/basic/`。',
       '- 声称就绪前，至少通过 `openprd validate .` 和 `openprd standards . --verify`。',
       '- 实现就绪还要运行 `openprd quality . --verify`，并审阅 HTML 质量评估报告中的场景标签、必需 EVO 门禁、可观测性、业务护栏、评估执行环境、性能和知识缺口。L2 或跨页面实现的最终回复必须带上最新 HTML 质量报告和 task-scoped 测试报告路径；缺失时只能说“实现完成但项目级收口未完成”。',
-      '- 用户要求生成图片、封面图、配图、海报、插画、图标、贴纸、头像、banner、主视觉/KV、运营图、效果图、视觉稿、mockup、先看样子或先确认设计方向时，默认直接调用 `imagegen`，也就是 Codex 原生 Image 2，产出图片；对 logo、icon、avatar、badge 等开发素材，如果用户未明确要求 mockup、场景图、设备框、卡片承载、名片/包装展示或参考界面复刻，默认按独立素材输出（standalone asset）处理：使用全画布单主体，不额外添加 UI frame、卡片、设备壳、名片、桌面陈列、手持实拍或其他展示容器。只有当用户明确要求 mockup、场景化效果图、容器化呈现，或参考图本身包含这些结构时，才生成对应容器或场景；除非用户明确指定 HTML、SVG、CSS、Canvas、代码稿或可编辑矢量/source artifact，不要改用临时 HTML/SVG/CSS 再截图。只有实际发生 `imagegen` 调用后，才能汇报生图结果、失败或限流。',
-      '- OpenPrd 的 `review.html` 用于需求评审，不能替代图片或效果图生成；`visual-compare` 只用于实现阶段视觉证据：已有参考图时对比“效果图 / 实现截图”；没有参考图时先判断新建界面还是修改既有界面，新建界面回到实现前 3 方向方案评审，修改既有界面再对比“修改前 / 修改后”；当局部细节更重要时，优先改用 `--board` 生成“局部焦点证据板”；当并行跑了多个优化方向时，优先改用 `--board` 生成“并行实验证据板”。',
-      '- 大界面改动在需求分流后、PRD 定稿或实现开工前先做视觉方案评审。先判断这是不是会决定首屏、核心布局、信息架构、主视觉或关键路径的场景，而不是按关键词触发；已有界面时用 Codex Computer Use 进入产品内对应功能并截当前真实界面，冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief。再调用 `imagegen`（Codex 原生 Image 2）生成至少 3 个不同设计思想方向；把效果图横向拼成一张大图，左上角标注 1/2/3，保存到 `.openprd/harness/visual-reviews/` 并展示给用户确认；未确认方向前不要进入大 UI 实现。',
-      '- 界面、页面、视觉、样式或前端体验开发中，只要已经有效果图、设计稿、图片资产或用户给图并进入实现阶段，阶段性完成后必须先截实现图，再运行 `openprd visual-compare . --reference <效果图> --actual <实现截图>` 生成左右对比 JPG。左侧标注“效果图”，右侧标注“实现截图”；如果这次要审局部细节，就补一份 `--board <focus-board.json>` 的局部焦点证据板。Agent 必须查看合成图并继续对标，直到没有明显视觉差异，不能只凭主观判断宣称完成。',
+      '- 用户要求生成图片、封面图、配图、海报、插画、图标、贴纸、头像、banner、主视觉/KV、运营图、效果图、视觉稿、mockup、先看样子或先确认设计方向时，默认直接调用 `imagegen`，也就是 Codex 原生 Image 2，产出图片；对 logo、icon、avatar、badge 等开发素材，如果用户未明确要求 mockup、场景图、设备框、卡片承载、名片/包装展示或参考界面复刻，默认按独立素材输出（standalone asset）处理：使用全画布单主体，不额外添加 UI frame、卡片、设备壳、名片、桌面陈列、手持实拍或其他展示容器。只有当用户明确要求 mockup、场景化效果图、容器化呈现，或参考图本身包含这些结构时，才生成对应容器或场景；除非用户明确指定 HTML、SVG、CSS、Canvas、代码稿或可编辑矢量/source artifact，不要改用临时 HTML/SVG/CSS 再截图。只有实际发生 `imagegen` 调用后，才能汇报生图结果、失败或限流。生图结果先当候选效果图，不要默认登记到 `.openprd/harness/visual-reviews/`；如果用户还要继续做实现，主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现。',
+      '- OpenPrd 的 `review.html` 用于需求评审，不能替代图片或效果图生成；`visual-compare` 只用于实现阶段视觉证据：已有确认参考图时对比“效果图 / 实现截图”；没有参考图时先判断新建界面还是修改既有界面，新建界面回到实现前 3 方向方案评审，修改既有界面再对比“修改前 / 修改后”；当局部细节更重要时，优先改用 `--board` 生成“局部焦点证据板”；当并行跑了多个优化方向时，优先改用 `--board` 生成“并行实验证据板”。当参考图是一张整板、网格图、多对象或多子图组合时，先运行 `openprd visual-prepare` 生成 reference-set、contact sheet 和 board 模板，再进入实现对比。',
+      '- 大界面改动在需求分流后、PRD 定稿或实现开工前先做视觉方案评审。先判断这是不是会决定首屏、核心布局、信息架构、主视觉或关键路径的场景，而不是按关键词触发；已有界面时用 Codex Computer Use 进入产品内对应功能并截当前真实界面，冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief。再调用 `imagegen`（Codex 原生 Image 2）生成至少 3 个不同设计思想方向；把效果图横向拼成一张带 1/2/3 序号的大图，先作为候选效果图展示给用户。只有用户确认纳入后续对比或继续实现后，才把选定方向、整张图或其中子图整理到 `.openprd/harness/visual-reviews/` 并进入实现。',
+      '- 界面、页面、视觉、样式或前端体验开发中，只要已经有效果图、设计稿、图片资产或用户给图并进入实现阶段，阶段性完成后必须先截实现图，再运行 `openprd visual-compare . --reference <效果图> --actual <实现截图>` 生成左右对比 JPG。左侧标注“效果图”，右侧标注“实现截图”；如果这次要审局部细节，就补一份 `--board <focus-board.json>` 的局部焦点证据板。如果一张参考图里有多个子图、网格或对象，先运行 `openprd visual-prepare . --reference <效果图> --grid <列>x<行>` 或 `--boxes <plan.json>`，确认 contact sheet 后再逐项对比。Agent 必须查看合成图并继续对标，直到没有明显视觉差异；如果用户后续说“跟效果图”“不一致”“好丑”“复刻”，至少先产出一份视觉证据图，不能只凭主观判断宣称完成。',
       '- 界面、页面、视觉、样式或前端体验开发中，如果没有明确效果图、设计稿、图片资产或用户给图，要先判断这是新建界面还是修改既有界面：新建界面走实现前 3 方向方案评审；修改既有界面则动手前必须先用 Computer Use、Browser、Playwright 或项目现有工具截取修改前截图。完成后用同一入口、视口、账号和数据状态截取修改后截图，再运行 `openprd visual-compare . --before <修改前截图> --after <修改后截图>`。如果这次并行试了多条优化方向，再补一份 `--board <parallel-board.json>` 的并行实验证据板。Agent 必须查看合成图，确认预期变化出现且未改区域没有明显漂移。',
+      '- 界面任务进入实现前，先用 `.openprd/design/` 锁定设计框架：页面涉及具体产品事实、版本、发布时间、规格、价格、引用数据或地点事实时，先补 `.openprd/design/active/facts-sheet.md`；页面依赖 logo、产品图、UI 图、摄影图、插图、图表或品牌色字体时，先补 `.openprd/design/active/asset-spec.md`；旅游、展览、内容、案例、发布、品牌故事等内容型页面，要先判断真实图片是不是页面成立前提，必要时先补 `.openprd/design/active/image-preflight.md`；没有明确参考方向时，先补 `.openprd/design/active/direction-plan.md`，并确保 3 个方向来自不同生成逻辑；用户选定方向后，再补 `.openprd/design/active/selected-direction.md`，把选中的 lens、theme、layout、组件和风险锁定。如果用户已经给了效果图、设计稿、参考截图或其他明确参考图，先把它当成主参考源：只有现有 starter、theme、layout 足够接近时才复用，不接近就允许偏离默认组合，以参考图为准。空白工作区的静态原型优先从 `.openprd/design/templates/` 里挑最近模板；如果当前轮用户已经把页面主题、模块范围或“直接实现”的意图说清，优先运行 `openprd run . --context --message <用户原话>`。如果页面主题和模块范围已经明确，优先运行 `openprd design-starter . --starter <starter-id> --out index.html --brief "<页面主题>" --sections "<模块1|模块2|模块3>"`，让 starter 一次写实 active design artifacts 和第一版真实页面。只有像个人博客、工具台、纯结构化产品页这类确认不靠真实图片成立的页面，才在 active design artifacts 写清无依赖并补 `--no-external-facts --no-brand-assets --no-real-images`；若题目更像旅游、导览、展览、博物馆、城市、自然观察或案例内容页，先不要带 `--no-real-images`，让 starter 先尝试补首批真实图片；若这类冷启动即使带 message 仍短暂返回 `clarify-user`，把它当成摘要级提醒，先用 3 到 5 行 mini-plan 收口，再继续。starter 落地后默认进入 `Patch Mode`：必须直接在生成的入口文件上补丁修改；即使结构要大改，也是在同一路径内覆盖，不做 delete-first，更不要删除 `index.html` 后另起新稿。如果确实要整页重写，先把完整新稿写到 sibling draft，例如 `index.next.html`，确认内容成形后再覆盖回 `index.html`，不要让正式入口出现空窗。starter 一落地后，只允许做一轮就地对焦：快速读一次生成的入口文件和必要的 active design artifacts；这轮对焦结束后，下一步就必须是真实写入口，不要再回头搜网页、翻 `docs/basic/` 或继续模板漫游。把最后一批必要的查事实、查图、读模板动作放在口头宣布之前做完；一旦已经说“开始覆盖入口文件”或“开始整页重写”，下一步必须出现真实写文件动作，而不是继续只读浏览、压图或停在口头承诺；必要时 hook 会把这类非写入动作挡回去。`Patch Mode` 完成不等于只补合同、只下载素材或只写计划；至少要把入口文件本体改完、主要占位清掉，并把已准备好的真实图片或参考约束真正落进页面。',
       '- 看到生成文件疑似过期时，先运行 `openprd doctor .`。',
       '- `.openprd/harness/install-manifest.json` 里的 `optionalCapabilities` 用来记录非阻断式增强建议：如果当前任务明显受益但状态还是 `recommended`，在后续建议里说明它能帮什么、给出文档和 GitHub 链接，并可顺手提出“如果你愿意，我可以按当前客户端帮你补配置”；不要因为它未配置就阻断当前任务。',
+      '- 前端体验任务进入实现前，优先读取 `$openprd-frontend-design` 与 `.openprd/design/`，先锁定 lens、theme、layout 和组件，再决定是否实现。',
       '- `openprd run . --context` 只是建议。规划、分析、review、影响范围说明等请求保持只读，除非当前用户消息明确要求开发、实现、继续任务、深度调研、对标复刻或 commit/push。',
       '- 用户给出会话 ID 并要求继续时，按工具无关的历史会话精确续接；不要要求或使用工具专属 ID；当前 active change、相似历史或 requirement gate 只能作为背景，不能替代该会话 ID。',
       '- 代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>` 或 `node scripts/openprd-dev-check.mjs . <file...>`；700 行以内正常，701-1500 行需注意，超过 1500 行警告。若出现需要关注的文件，最终回复必须以 **后续建议** 为标题，直接复用 dev-check 生成的 Markdown 表格，列出影响对象、关注程度、规模信号、预警原因、本次处理结果和后续建议，并按 🔴 → 🟠 → 🟡 排序；不要把“关注程度”列改写成纯 emoji，必须保留例如 `🟠 中风险｜建议优先关注` 这类完整标签；如果你改写了“预警原因 / 本次处理结果 / 后续建议”，先用 `node scripts/dev-check-wrapup-copy.mjs --validate` 校验每格不超过 20 字；若报错，按提示缩短后重试。',
@@ -187,7 +201,7 @@ const CANONICAL_SKILLS = [
       '- 只要实现新增或修改文件，就做文档影响检查；缺失的 `docs/basic/`、文件说明书和文件夹 README 要补齐，已有文档受影响时要更新。',
       '- 涉及后端、脚本、Agent、工具链、服务或数据处理变更时，把 CLI 与 API 视为同级接入面：检查命令入口、参数、输出契约、`help`、`doctor`、`dry-run`、`status` 与接口协议、返回结构、身份边界是否受影响，并同步更新 `docs/basic/backend-structure.md`；若某一面不适用也要明确写原因。',
       '- Codex hooks 默认使用 `lite`：`UserPromptSubmit` 注入上下文、轻量 `PreToolUse` 写入门禁，以及 `Stop` 本轮收工回顾。若发现可复用的项目经验，`Stop` 会要求 Agent 在最终回复结尾用人话说明“本次观察到的情况 / 计划保留的项目经验 / 以后怎么复用 / 只保留在当前项目里”，再询问用户是否保留；只有项目明确需要更重的工具级遥测时，才切到 `full`。',
-      '- 需求分流优先使用 `$openprd-requirement-intake`，不要按固定关键词判断。用户可见需求类型和内部路由码的固定对照为：直接处理=L0、现有功能优化=L1、新功能/新流程方案=L2。用户审查默认把路由码并进“需求类型：直接处理（L0）”这类标签里；只有内部排障确实受益时，才额外附“内部路由码”。L0 可直接处理并事后说明，不打开正式 PRD/review/change/tasks；L1 先给对话内 mini-plan，默认不生成正式 PRD/change/tasks；只有 L2 才进入 requirement intake 与 PRD/review/change/tasks。L2 的对话内 requirement 摘要默认按“需求判断 / 需求理解 / 功能范围 / 技术方案”四段来写，其中“功能范围”和“技术方案”优先用 Markdown 表格，帮助用户先总后分地看清范围和实现方向；`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标，边界、风险、异常例子和技术细节下沉到后面的分项或表格，不要把它们都塞进一整段长话里，也不要把某条示例文案写成固定模板。如果用户刚刚已经确认了现有功能优化（L1）的 mini-plan、范围边界或正式产品边界，后续承接要明确写成“已确认，我按这个继续/收口/落地”，不要用“确认，我们就按这个……”这类像再次索取确认的句子。单纯的“请帮我实现/继续实现”不等于跳过 requirement 摘要确认、`capture/classify/synthesize` 写入路径或 review；只有用户明确表示“不需要进行任何确认”时，才允许静默走完整 requirement write path。若当前仍在 L2 的首轮澄清或 requirement 摘要确认阶段，不要写成“你回我一句我就开始实现”；只能承诺“我先整理需求摘要给你确认，确认后再进入 PRD / review 流程”。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。若用户原始意图已经明确要求实现，review 已确认且 tasks 就绪后可直接进入执行；否则在请求执行授权前，先输出执行确认清单，列出本轮目标、将执行内容、不做事项、验证方式和已知风险，不能只要求用户回复一句确认。',
+      '- 需求分流优先使用 `$openprd-requirement-intake`，不要按固定关键词判断。用户可见需求类型和内部路由码的固定对照为：直接处理=L0、现有功能优化=L1、新功能/新流程方案=L2。用户审查默认把路由码并进“需求类型：直接处理（L0）”这类标签里；只有内部排障确实受益时，才额外附“内部路由码”。L0 可直接处理并事后说明，不打开正式 PRD/review/change/tasks；L1 先给对话内 mini-plan，默认不生成正式 PRD/change/tasks；只有 L2 才进入 requirement intake 与 PRD/review/change/tasks。L2 的对话内 requirement 摘要默认按“需求判断 / 需求理解 / 功能范围 / 技术方案”四段来写，其中“功能范围”和“技术方案”优先用 Markdown 表格，帮助用户先总后分地看清范围和实现方向；`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标，边界、风险、异常例子和技术细节下沉到后面的分项或表格，不要把它们都塞进一整段长话里，也不要把某条示例文案写成固定模板。若当前仍是 0 到 1 探索、脑暴或值不值得做的判断，摘要里还要主动补上“验证与创业闭环”：第一批最容易触达的社区或种子用户、当前替代方案、先怎么手工交付、什么承诺才算真需求、最低成本先验证什么，以及验证阶段怎样先活下来。如果用户刚刚已经确认了现有功能优化（L1）的 mini-plan、范围边界或正式产品边界，后续承接要明确写成“已确认，我按这个继续/收口/落地”，不要用“确认，我们就按这个……”这类像再次索取确认的句子。单纯的“请帮我实现/继续实现”不等于跳过 requirement 摘要确认、`capture/classify/synthesize` 写入路径或 review；只有用户明确表示“不需要进行任何确认”时，才允许静默走完整 requirement write path。若当前仍在 L2 的首轮澄清或 requirement 摘要确认阶段，不要写成“你回我一句我就开始实现”；只能承诺“我先整理需求摘要给你确认，确认后再进入 PRD / review 流程”。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。若用户原始意图已经明确要求实现，review 已确认且 tasks 就绪后可直接进入执行；否则在请求执行授权前，先输出执行确认清单，列出本轮目标、将执行内容、不做事项、验证方式和已知风险，不能只要求用户回复一句确认。',
       '- 涉及最佳实践、benchmark、对标、参考产品、prompt engineering、Agent harness、context engineering、图标资源、CLI 或 skill 体系设计时，先使用 `$openprd-benchmark-router` 选择证据源，再进入 Context7、DeepWiki 或官方资料调研。',
       '- 入口路由优先看 `$openprd-router`；具体命令速查优先看 `.openprd/harness/command-catalog.md`。',
       '- `AGENTS.md` 只保留轻量合同；详细执行细则优先沉淀到 repo-local skills、command catalog 和 hooks。',
@@ -240,6 +254,7 @@ const CANONICAL_SKILLS = [
       '',
       '- 用户提到 OpenPrd、OpenSpec、Superpowers、Anthropic Skills、Lark CLI、Agent harness、AI code review、PR review、review lane、long-running agents、context engineering、prompt engineering、最佳实践、对标、参考、复刻或优化设计。',
       '- 用户提到图标、icon、图标站、图标库、图标资源、UI 图标、AI 图标、技术图标、3D 图标、功能图标、iconfont 或视觉资产参考。',
+      '- 用户提到界面审美、设计框架、主题库、模板库、组件骨架、视觉资产库、前端体验风格或页面参考方法。',
       '- 用户要求解释某个 Codex / Claude / Cursor agent 为什么没有发现 skill，或希望提升 skill 自动识别、路由、生成、安装和持续执行能力。',
       '- 用户没有显式说 skill 名也要触发；不要要求用户记住 `$openprd-benchmark-router`。',
       '',
@@ -265,13 +280,16 @@ const CANONICAL_SKILLS = [
       '- GitHub 仓库：需要理解架构、核心模块、关键流程或对标结论时，先用 DeepWiki。默认顺序是 `read_wiki_structure` 1 次，再 `ask_question` 1-2 次；只有在本地源码和已有结论仍不足时才追加。DeepWiki 不可用或覆盖不足时，再回退到 GitHub README、源码和官方文档。',
       '- 官方技术文档：涉及第三方库、框架、API、SDK、MCP、CLI 工具的用法、配置、限制、版本差异或迁移路径时，先检查本地代码、锁文件、README、类型定义；本地不足时再用 Context7，默认顺序是 `resolve_library_id` 1 次，再 `query_docs` 1-2 次。Context7 不足时说明缺口，再补官方文档、源码或其他一手资料。',
       '- 工程文章和产品文档：优先读取当前线上一手页面，只抽取和当前任务相关的观点与设计原则，不复制长文；如果内容可能过时，要说明时效风险。',
+      '- 视觉与设计参考：优先吸收结构、节奏、信息组织、资产策略和质量门，不照搬品牌表层风格。需要官方品牌或产品事实时，优先官方站点、官方媒体包、官方设计系统和项目自身 approved benchmark。',
       '- 本地源码优先：当前工作区已经有相关源码时，常规修 bug、查实现、改功能优先读本地代码；DeepWiki 主要用于外部仓库架构理解和对标分析。',
       '- 停止调研：找到足以支持当前决策的 1-3 个高相关来源后停止扩展；候选来源重复时保留更权威、更新或更贴近当前任务的来源。',
       '- 追加调用前先写清“已确认什么、还缺什么”；不要为了同一问题只换个说法反复查询。',
       '',
       '## Source Map',
       '',
-      '- OpenPrd / PRD 设计对标：`obra/superpowers`、`Fission-AI/OpenSpec`。',
+      '- `Fission-AI/OpenSpec`：适合对标 spec 驱动变更流程、change lifecycle、spec 与 execution artifact 分层、动态 agent 指令组装和验证门禁。',
+      '- `obra/superpowers`：适合对标 mandatory skill routing、多平台适配、轻量 bootstrap、worktree/subagent 协作和 skill 深浅分层。',
+      '- `slavingia/skills`：适合对标 0 到 1 验证、community-first、current workaround、manual-first delivery、commitment signals、processize before productize 和 default alive 思路，并把这些原则回写到 requirement-intake、brainstorm 和 PRD 结构。',
       '- CLI 与 skill 体系对标：`larksuite/cli`、`anthropics/skills`、Claude Skills 官方文档、Claude Code Skills 官方文档。',
       '- 长程 Agent 任务：Anthropic long-running agents harness 工程文章。',
       '- 通用 harness：OpenAI harness engineering、LangChain agent harness anatomy。',
@@ -289,11 +307,13 @@ const CANONICAL_SKILLS = [
       '- 上下文工程：哪些信息常驻、哪些按需检索，是否使用稳定路径、链接和来源 ID 支持 just-in-time 检索，如何处理过期、冲突和可信度。',
       '- 提示词与 Skill 设计：触发描述是否具体但不过度强制，主说明是否短，细节是否按需放到 reference，是否明确不要硬套参考源。',
       '- 图标与视觉资产：先判断用途是 UI、AI 品牌、技术栈、3D 物件还是功能图标；优先选最贴近用途的资源站，再在实现阶段选择合适的代码图标库。',
+      '- 前端设计框架：先判断要借的是主题锁定、布局骨架、组件清单、事实前置、素材前置、图片前置还是质量门；把可迁移原则落回 `.openprd/design/`、repo-local skill、hooks 或测试，不要停留在“参考了几个好看页面”。',
       '- CLI 与开发者体验：命令是否可发现、可组合、可预测；错误信息是否说明发生了什么、影响是什么、下一步怎么做；危险操作是否有确认。',
       '',
       '## 设计输出',
       '',
       '- 给出 OpenPrd 应该内置什么、生成什么、路由什么、保留什么门禁。',
+      '- 如果来源本质上在讲 0 到 1 验证或创业判断，优先把“社区 -> 替代方案 -> 手工路径 -> 承诺信号 -> 最低成本验证 -> 先活下来”落到 requirement-intake、brainstorm、PRD 模板和 hook 提示里，而不是只加一条灵感备注。',
       '- 优先把结论落到 `CANONICAL_SKILLS`、repo-local skills、AGENTS/CLAUDE/Cursor 生成规则、hooks 或测试，而不是停留在口头建议。',
       '- 不把外部项目整包复制进 OpenPrd；只吸收可验证的路由、生成、门禁、状态承接和用户体验原则。',
       '- 需要显式说明时，简短写出参考了哪个来源、借鉴点、适用原因、不照搬边界，以及落到当前任务的具体决策。',
@@ -322,10 +342,12 @@ const CANONICAL_SKILLS = [
       '4. 需要完整工作流细节时，运行 `openprd status .` 和 `openprd next .`。',
       '4a. `openprd init/setup/update/doctor` 可能会把 Context7、DeepWiki 这类非阻断式增强能力写进 `.openprd/harness/install-manifest.json` 的 `optionalCapabilities`。把它当成软建议：初始化、诊断和当前任务都不因它失败；只有当当前任务会明显受益时，才在后续建议里解释能力价值、附官方文档 / GitHub 链接，并视情况提出可代为补配置。',
       '5. 涉及最佳实践、benchmark、对标、参考产品、prompt engineering、Agent harness、context engineering、图标资源、CLI 或 skill 体系设计时，先使用 `$openprd-benchmark-router`。',
-      '6. 先用 `$openprd-requirement-intake` 做需求类型语义分流：直接处理(L0)可直接处理并事后说明，不打开正式 PRD/review/change/tasks；现有功能优化(L1)给对话内 mini-plan 后执行，默认不生成正式 PRD/change/tasks；只有新功能/新流程方案(L2)在改代码前必须先走需求入口：`openprd clarify .` 会生成需求入口自省，并只在对话内输出澄清摘要或简短清单；正式 HTML 评审留给后续 review。',
-      '7. 事实缺失时，先用 `openprd clarify .` 生成需求入口自省，并在对话里先按“需求判断 / 需求理解 / 功能范围 / 技术方案”给 requirement 摘要；其中“功能范围”和“技术方案”优先用 Markdown 表格，分别写清 `功能模块 | 这次先做什么 | 这次先不做什么` 与 `技术部分 | 初步方案 | 主要负责什么`。`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标；边界、风险、异常例子和技术细节下沉到后续分项或表格，不要揉成一大段长话，也不要把某条示例文案写成固定模板。确认该 requirement 摘要后，再用 `openprd capture .` 写回已确认事实，并继续 classify/synthesize/review、生成或检查 change、拆任务。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。`clarifyPresentation.mode` 为 `inline` 或 `inline-with-checklist`，直接在对话中先整理首轮项目画像：用户群体、产品形态、第一版切片、暂不处理、不能破坏和风险探针，再压缩成用户容易看懂的总分结构，不打开澄清 HTML。L2 的首轮澄清只能承诺“我先整理需求摘要给你确认，确认后再进入 PRD / review 流程”；不要写成“你回我一句我就开始实现”，也不要把 requirement 摘要确认、review 和实现合成一步。review 重点摘要胶囊应控制在 15 个字以内，作为扫读标签，不写成长句；对用户给稳定 artifact 路径，确认命令使用页面复制出的 `--version`、`--digest` 和 `--work-unit`，不要把可被其他对话覆盖的 active review 当成唯一确认入口，也不要把“可以开做”“继续实现”、单纯的“请帮我实现”，或单独一句“不要评审”当成 `review --mark confirmed` 或 requirement 写入路径的依据。生成 spec 和 tasks 时默认使用简体中文，但必要专有名词、品牌名、命令名、路径、字段名和 API 术语可以保留原文；如果只是纯内部措辞整理，可用 `openprd capture . --source agent-normalized` 写回，这类非语义规范化不应重开用户 review。默认 approval policy 是 decision-points：需要时保留稳定 `review.html`，但只有用户明确表示不需要进行任何确认时，才允许跳过 requirement 摘要确认并按当前稳定 artifact 的精确 `version + digest + work-unit` 静默记录 review；单纯的“请帮我实现/继续实现”不触发这个豁免。若用户刚刚已经确认了现有功能优化（L1）的 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”，不要写成“确认，我们就按这个……”这类像再次索取确认的句子。若用户原始意图已明确要求实现，则在当前 approval policy 满足且 tasks 就绪后直接进入执行；否则先输出执行确认清单，列出本轮目标、将执行内容、不做事项、验证方式和已知风险，再请求明确执行授权，不能只要求用户回复一句确认。',
+      '6. 先用 `$openprd-requirement-intake` 做需求类型语义分流：直接处理(L0)可直接处理并事后说明，不打开正式 PRD/review/change/tasks；现有功能优化(L1)给对话内 mini-plan 后执行，默认不生成正式 PRD/change/tasks；只有新功能/新流程方案(L2)在改代码前必须先走需求入口：`openprd clarify .` 会生成需求入口自省，并只在对话内输出澄清摘要或简短清单；正式 HTML 评审留给后续 review。若当前问题本质上还在判断值不值得做、先找谁验证、能不能先手工交付，就先补“创业验证透镜”，不要急着把方案写成既定需求。',
+      '6a. 任何界面、页面、视觉、样式或前端体验任务在进入实现前，都要额外读取 `$openprd-frontend-design`，并优先检查 `.openprd/design/active/` 下是否已经补齐 `facts-sheet / asset-spec / image-preflight / direction-plan / selected-direction`。',
+      '7. 事实缺失时，先用 `openprd clarify .` 生成需求入口自省，并在对话里先按“需求判断 / 需求理解 / 功能范围 / 技术方案”给 requirement 摘要；其中“功能范围”和“技术方案”优先用 Markdown 表格，分别写清 `功能模块 | 这次先做什么 | 这次先不做什么` 与 `技术部分 | 初步方案 | 主要负责什么`。`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标；边界、风险、异常例子和技术细节下沉到后续分项或表格，不要揉成一大段长话，也不要把某条示例文案写成固定模板。若当前更像 0 到 1 验证，摘要里还要主动抬出：第一批最容易触达的社区或种子用户、当前替代方案、先怎么手工交付、什么承诺才算真需求、最低成本先验证什么，以及验证阶段怎样先活下来。确认该 requirement 摘要后，再用 `openprd capture .` 写回已确认事实，并继续 classify/synthesize/review、生成或检查 change、拆任务。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。`clarifyPresentation.mode` 为 `inline` 或 `inline-with-checklist`，直接在对话中先整理首轮项目画像：用户群体、产品形态、第一版切片、暂不处理、不能破坏和风险探针，再压缩成用户容易看懂的总分结构，不打开澄清 HTML。L2 的首轮澄清只能承诺“我先整理需求摘要给你确认，确认后再进入 PRD / review 流程”；不要写成“你回我一句我就开始实现”，也不要把 requirement 摘要确认、review 和实现合成一步。review 重点摘要胶囊应控制在 15 个字以内，作为扫读标签，不写成长句；对用户给稳定 artifact 路径，确认命令使用页面复制出的 `--version`、`--digest` 和 `--work-unit`，不要把可被其他对话覆盖的 active review 当成唯一确认入口，也不要把“可以开做”“继续实现”、单纯的“请帮我实现”，或单独一句“不要评审”当成 `review --mark confirmed` 或 requirement 写入路径的依据。生成 spec 和 tasks 时默认使用简体中文，但必要专有名词、品牌名、命令名、路径、字段名和 API 术语可以保留原文；如果只是纯内部措辞整理，可用 `openprd capture . --source agent-normalized` 写回，这类非语义规范化不应重开用户 review。默认 approval policy 是 decision-points：需要时保留稳定 `review.html`，但只有用户明确表示不需要进行任何确认时，才允许跳过 requirement 摘要确认并按当前稳定 artifact 的精确 `version + digest + work-unit` 静默记录 review；单纯的“请帮我实现/继续实现”不触发这个豁免。若用户刚刚已经确认了现有功能优化（L1）的 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”，不要写成“确认，我们就按这个……”这类像再次索取确认的句子。若用户原始意图已明确要求实现，则在当前 approval policy 满足且 tasks 就绪后直接进入执行；否则先输出执行确认清单，列出本轮目标、将执行内容、不做事项、验证方式和已知风险，再请求明确执行授权，不能只要求用户回复一句确认。',
       '8. 评审页里的需求关系图、需求流程图和重点摘要不要靠 HTML 截断；`openprd synthesize` 生成版本快照后，不要直接让用户确认 review。必须先用 `openprd review-presentation . --template` 查看展示文案契约，让 Agent 按 reviewPresentation 写短文案，再用 `openprd review-presentation . --presentation <json> --write --fail-on-violation` 校验并写回；脚本会在通过后写入校验元信息并重渲染可确认 review.html。超限时按脚本返回的 jsonPath 和字数限制重新提炼，不手工改快照、不裁剪原文。',
-      '8a. 界面、页面、视觉、样式或前端体验需求要额外判断 UI 影响面：若会明显改变信息架构、核心布局、主视觉、关键路径、组件层级/密度，或用户需要先选设计方向，先做“大界面改动视觉方案评审”。在 PRD 定稿或实现开工前，已有界面时用 Codex Computer Use 截取产品内对应功能当前界面，冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief；再用 `imagegen`（Codex 原生 Image 2）生成至少 3 个不同设计思想方向，横向拼接为一张左上角标注 1/2/3 的大图并保存到 `.openprd/harness/visual-reviews/`，展示给用户确认方向。',
+      '8a. 界面、页面、视觉、样式或前端体验需求要额外判断 UI 影响面：若会明显改变信息架构、核心布局、主视觉、关键路径、组件层级/密度，或用户需要先选设计方向，先做“大界面改动视觉方案评审”。在 PRD 定稿或实现开工前，已有界面时用 Codex Computer Use 截取产品内对应功能当前界面，冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief；再用 `imagegen`（Codex 原生 Image 2）生成至少 3 个不同设计思想方向，横向拼接为一张左上角标注 1/2/3 的大图作为候选效果图展示。主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现；只有确认后才把选定方向、整张图或其中子图整理到 `.openprd/harness/visual-reviews/`。',
+      '8b. 3 个方向不能只是同一种安全解的轻微变化。至少要在 `.openprd/design/active/direction-plan.md` 里区分不同生成逻辑、适用场景和主要风险；一旦用户确认方向，先在 `.openprd/design/active/selected-direction.md` 锁定选中的 lens、theme、layout 和组件，再进入编码。',
       '9. 对外说明默认用业务和产品语言，先给结论和下一步；涉及第三方 API、模型、云服务或付费工具时，用表格比较多家方案的效果、价格、接入成本、限制、风险和推荐理由，默认选择性价比最优；当用户的问题包含多个对象、方案、文件、场景、风险、验证项、素材或任务，并且需要同时呈现状态、证据、影响、动作或推荐时，主动使用 Markdown 表格，单一结论、代码示例、命令示例和叙事型说明不要强行表格化。',
       '10. 当 PRD 需要进入实现准备时，再运行 `openprd change . --generate --change <id>`。',
       '11. change/tasks 就绪后，用 `$openprd-test-strategy` 为每个任务确认 test-layer、test-size、test-scope、evidence-plan、升级原因或豁免原因；小改动从单测开始，触达契约、用户主路径、视觉、小程序、性能、安全或成本风险时升级验证层级。并且同步按 execution strategy 标注 `serial / parallel-workers / parallel-workers-isolated`、`write-scope`、`owner-role`、`local-verify` 和 `integration-owner`，让主 Agent 可以做 worker 分片和最终审查。',
@@ -334,8 +356,10 @@ const CANONICAL_SKILLS = [
       '14. 如果执行中发现新代码后缀、豁免路径、命令别名、项目约定或用户偏好，不要中途打断任务。代码扩展识别这类白名单工具补全会自动应用并记录；用户偏好、项目协作规矩和 OpenPrd 默认行为形成 growth candidate，收工时用 `openprd grow . --review` 集中确认。',
       '15. 维护 OpenPrd 本身时，只要新增或修改配置类能力（阈值、规则、识别、豁免、命令别名、环境差异、用户偏好或策略开关），默认先做 grow-aware 自检：高置信应可成长时直接纳入 `openprd grow` 体系；不确定时主动询问用户是否做成可成长配置。',
       '16. 实现过程中，每次新增或修改文件都做文档影响检查，补齐缺失的 `docs/basic/`、文件说明书和文件夹 README，并更新受影响文档；涉及后端、脚本、Agent、工具链、服务或数据处理变更时，把 CLI 与 API 视为同级接入面：同步检查命令入口、参数、输出契约、`help`、`doctor`、`dry-run`、`status` 与接口协议、返回结构、身份边界是否受影响，并更新 `docs/basic/backend-structure.md` 或明确写不适用原因。',
+      '16a. 如果这轮实现补充了新的前端设计主题、布局骨架、组件 recipe 或 anti-slop 规则，同步更新 `.openprd/design/` 与 `docs/basic/frontend-guidelines.md`，不要只留在代码里。',
       '17. 用户要求生成图片、封面图、配图、海报、插画、图标、贴纸、头像、banner、主视觉/KV、运营图、效果图、视觉稿、mockup、先看样子或先确认设计方向时，默认直接调用 `imagegen`，也就是 Codex 原生 Image 2，产出图片；对 logo、icon、avatar、badge 等开发素材，如果用户未明确要求 mockup、场景图、设备框、卡片承载、名片/包装展示或参考界面复刻，默认按独立素材输出（standalone asset）处理：使用全画布单主体，不额外添加 UI frame、卡片、设备壳、名片、桌面陈列、手持实拍或其他展示容器。只有当用户明确要求 mockup、场景化效果图、容器化呈现，或参考图本身包含这些结构时，才生成对应容器或场景；除非用户明确指定 HTML、SVG、CSS、Canvas、代码稿或可编辑矢量/source artifact，不要改用临时 HTML/SVG/CSS 再截图。只有实际发生 `imagegen` 调用后，才能汇报生图结果、失败或限流。OpenPrd 的 `review.html` 只用于需求评审，不能替代图片或效果图生成。若用户目标是把本次工作转成可学习、可复用、可回看或可教学的材料，先按产物形态判断是否需要 `openprd learn .` 的学习包和阅读器；不要用关键词表触发，普通 Markdown 只能作为辅助讲义。',
-      '18. 大界面改动进入实现前，必须先完成 3 方向效果图评审并获得用户确认；冷启动没有现有界面、新建首屏、首页、控制台或核心页面时，即使没有修改前截图，也要基于 PRD 和用户画像先出 3 个方向。进入实现后，如果已经有效果图、设计稿、图片资产或用户给图，阶段性完成后先截实现图，再运行 `openprd visual-compare . --reference <效果图> --actual <实现截图>`。如果没有明确参考图，先判断新建界面还是修改既有界面：新建界面先完成 3 方向方案评审，修改既有界面动手前先截修改前截图，完成后用同一入口、视口、账号和数据状态截修改后截图，再运行 `openprd visual-compare . --before <修改前截图> --after <修改后截图>`。如果重点在局部变化，或局部细节需要放到同一张证据板里审阅，默认再补一份 `openprd visual-compare . --board <focus-board.json>` 的局部焦点证据板，把局部变化组合到同一张证据板里统一验收。默认输出 JPG 到 `.openprd/harness/visual-reviews/`；查看合成图后继续复核，直到预期变化出现且未改区域没有明显漂移。',
+      '18. 用户要求界面更好看、更稳定、有一致审美、能复用视觉资产或内置模板时，先路由到 `$openprd-frontend-design`。',
+      '18. 大界面改动进入实现前，先把 3 方向效果图当候选效果图展示给用户，并主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现；只有确认后才把选定方向、整张图或其中子图整理成 reference-set 并写入 `.openprd/harness/visual-reviews/`。冷启动没有现有界面、新建首屏、首页、控制台或核心页面时，即使没有修改前截图，也要基于 PRD 和用户画像先出 3 个方向。进入实现后，如果已经有确认参考图、设计稿、图片资产或用户给图，阶段性完成后先截实现图，再运行 `openprd visual-compare . --reference <效果图> --actual <实现截图>`。如果一张参考图里包含多个子图、网格或对象，先运行 `openprd visual-prepare` 生成 reference-set、contact sheet 和模板，再逐项对比。如果没有明确参考图，先判断新建界面还是修改既有界面：新建界面先完成 3 方向方案评审，修改既有界面动手前先截修改前截图，完成后用同一入口、视口、账号和数据状态截修改后截图，再运行 `openprd visual-compare . --before <修改前截图> --after <修改后截图>`。如果重点在局部变化，或局部细节需要放到同一张证据板里审阅，默认再补一份 `openprd visual-compare . --board <focus-board.json>` 的局部焦点证据板，把局部变化组合到同一张证据板里统一验收。默认输出 JPG 到 `.openprd/harness/visual-reviews/`；查看合成图后继续复核，直到预期变化出现且未改区域没有明显漂移。用户后续如果说“跟效果图”“不一致”“好丑”“复刻”，不能只口头说对比过了，至少产出一份视觉证据图。',
       '19. 声称单个 task 完成前，运行本任务 verify/dev-check/必要界面验证，并通过 `--evidence`、测试报告或任务 metadata 留下 task-scoped evidence；不要把全局 `openprd run . --verify` 当作 per-task 默认。',
       '20. 阶段收口、全部实现完成、handoff/commit/release/publish 前，运行 `openprd standards . --verify`、`openprd quality . --verify` 和 `openprd run . --verify`，把 HTML 质量评估报告当作整体 EVO 门禁、日志、业务成本与滥用护栏、测试策略矩阵、冒烟覆盖、性能、极端场景和项目知识的评审产物；L2 或跨页面实现的最终回复必须列出最新 HTML 质量报告和 task-scoped Markdown/HTML 测试报告路径。最终回复优先复用 `run . --verify` 的 `taskReady/workspaceReady` 拆分，不要把任务通过和工作区欠账混成一句泛化尾巴。',
       '21. `AGENTS.md` 只保留轻量合同；入口路由看 `$openprd-router`，具体命令速查看 `.openprd/harness/command-catalog.md`，更细的工作流步骤、路由边界和 hook 门禁以这份 skill、`$openprd-shared`、`$openprd-test-strategy` 和 `$openprd-benchmark-router` 为准。',
@@ -370,7 +394,7 @@ const CANONICAL_SKILLS = [
       '- 只有在任务 verify 命令和 task-scoped evidence 通过后，才用 `openprd loop . --finish --item <task-id> --evidence <path-or-summary>` 收尾；如果用户明确要求 commit，再先通过高风险最终门禁。',
       '- 前端界面任务里，Codex desktop 优先用 Computer Use；Codex CLI 和 Claude Code 优先用 Playwright、MCP 浏览器自动化或项目现有 e2e 工具。大界面改动进入实现前，先按用户目标、信息架构变化、视觉决策成本和验证风险判断方案评审形态：已有界面时 Codex desktop 必须优先用 Computer Use 获取产品内当前功能截图；冷启动没有现有界面时，基于已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief。',
       '- 用户只是要求生成图片、封面图、配图、海报、插画、图标、贴纸、头像、banner、主视觉/KV、运营图、效果图、视觉稿、mockup 或先看样子时，默认调用 `imagegen`（Codex 原生 Image 2）生成图片；对 logo、icon、avatar、badge 等开发素材，如果用户未明确要求 mockup、场景图、设备框、卡片承载、名片/包装展示或参考界面复刻，默认按独立素材输出（standalone asset）处理：使用全画布单主体，不额外添加 UI frame、卡片、设备壳、名片、桌面陈列、手持实拍或其他展示容器。只有当用户明确要求 mockup、场景化效果图、容器化呈现，或参考图本身包含这些结构时，才生成对应容器或场景；除非用户明确指定 HTML/SVG/CSS/Canvas/代码稿，不要生成临时 HTML 再截图；未调用 `imagegen` 前，不要声称生图已完成、失败或限流。',
-      '- 如果场景判断属于大界面改动，已有界面时基于产品截图生成至少 3 个设计方向；冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成至少 3 个设计方向；再横向拼接成带 1/2/3 序号的大图给用户确认。如果已有参考效果图、图片资产或用户给图并进入实现阶段，阶段性完成后必须生成实现截图，并用 `openprd visual-compare . --reference <效果图> --actual <实现截图>` 输出 JPG 视觉对比图；如果没有明确参考图，先判断新建界面还是修改既有界面：新建界面先完成 3 方向方案评审，修改既有界面动手前先截修改前截图，完成后截修改后截图，并用 `openprd visual-compare . --before <修改前截图> --after <修改后截图>` 输出 JPG 自检图。未查看对比图、或对比图仍有明显差异/漂移时，不要声称界面视觉完成。',
+      '- 如果场景判断属于大界面改动，已有界面时基于产品截图生成至少 3 个设计方向；冷启动没有现有界面时基于已确认 PRD、用户群体、第一版切片和视觉目标生成至少 3 个设计方向；再横向拼接成带 1/2/3 序号的大图作为候选效果图给用户确认，并主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现。只有确认后才把选定方向、整张图或其中子图整理到 `.openprd/harness/visual-reviews/`。如果已有确认参考效果图、图片资产或用户给图并进入实现阶段，阶段性完成后必须生成实现截图，并用 `openprd visual-compare . --reference <效果图> --actual <实现截图>` 输出 JPG 视觉对比图；如果参考图里有多个子图、网格或对象，先运行 `openprd visual-prepare` 生成 reference-set、contact sheet 和模板，再逐项对比；如果没有明确参考图，先判断新建界面还是修改既有界面：新建界面先完成 3 方向方案评审，修改既有界面动手前先截修改前截图，完成后截修改后截图，并用 `openprd visual-compare . --before <修改前截图> --after <修改后截图>` 输出 JPG 自检图。未查看对比图、或对比图仍有明显差异/漂移时，不要声称界面视觉完成；如果用户后续说“跟效果图”“不一致”“好丑”“复刻”，至少先产出一份视觉证据图。',
       '- `openprd loop . --finish` 会写入 `.openprd/harness/test-reports/<task-id>.md` 和 `.openprd/harness/test-reports/<task-id>.html`；把这两份结构化测试报告和任务改动一起提交。',
       '- 让 `.openprd/harness/feature-list.json`、`progress.md`、`agent-sessions.jsonl`、`loop-state.json`、`loop-prompts/` 和 `test-reports/` 成为持久状态。',
       '',
@@ -545,8 +569,8 @@ const CANONICAL_SKILLS = [
       '- 可观测性：确认中心化 logs / traces / errors、共享 trace/request/task/error id、脱敏、保留期和查询示例。',
       '- 业务护栏：涉及免费用户、额度、AI 调用、第三方 API、生成、存储或下载时，确认成本来源、用户级限制、负向验证、监控、报警和止损动作。',
       '- 评估执行环境：确认冒烟测试、任务到功能覆盖、正常性能基线和极端数据压力场景；脚本存在只代表能力，不能替代本次运行证据。',
-      '- 大界面改动证据：先按用户目标、信息架构变化、视觉决策成本和验证风险判断是否需要方案评审；需要时确认 `.openprd/harness/visual-reviews/` 下存在 3 方向横向效果图大图，并且用户已选定方向。',
-      '- 视觉评审证据：涉及界面视觉实现且已有参考效果图时，确认 `.openprd/harness/visual-reviews/` 下存在本次 `openprd visual-compare` 输出的“效果图 / 实现截图”JPG，并且 Agent 已基于合成图复核差异；没有参考图时先按场景区分新建界面和修改既有界面：新建界面确认实现前 3 方向方案评审已完成，修改既有界面确认存在“修改前 / 修改后”JPG，并已检查预期变化和未改区域漂移；若验收关注局部细节，确认存在“局部焦点证据板”；若并行跑了多个优化方向，确认存在“并行实验证据板”。',
+      '- 大界面改动证据：先按用户目标、信息架构变化、视觉决策成本和验证风险判断是否需要方案评审；需要时确认候选效果图已经给用户看过，并且用户已明确确认哪个方向、整张图或哪些子图纳入后续对比；只有确认后的 reference-set 才应出现在 `.openprd/harness/visual-reviews/`。',
+      '- 视觉评审证据：涉及界面视觉实现且已有确认参考效果图时，确认 `.openprd/harness/visual-reviews/` 下存在本次 `openprd visual-compare` 输出的“效果图 / 实现截图”JPG，并且 Agent 已基于合成图复核差异；如果参考图来自整板、网格图或多对象候选图，确认已完成 `openprd visual-prepare` 产出的 reference-set、contact sheet 或 board 模板审查。没有参考图时先按场景区分新建界面和修改既有界面：新建界面确认实现前 3 方向方案评审已完成，修改既有界面确认存在“修改前 / 修改后”JPG，并已检查预期变化和未改区域漂移；若验收关注局部细节，确认存在“局部焦点证据板”；若并行跑了多个优化方向，确认存在“并行实验证据板”。',
       '- HTML 报告：把 `.openprd/quality/reports/*.html` 当成面向人的评审产物，而不是次级导出。',
       '- 知识沉淀：当某个已验证修复具备重复性、高影响、隐藏性或由 agent 误判引发时，把模式抽象到 `.openprd/knowledge/skills/<skill>/SKILL.md`。',
       '- 自我成长：当问题来自配置缺口、文件识别、命令习惯或用户偏好时，优先记录为 `.openprd/growth` 候选，经用户确认后固化；不要把个人偏好混进项目共享质量经验。',
@@ -645,16 +669,30 @@ const CANONICAL_COMMANDS = [
     ].join('\n'),
   },
   {
+    id: 'visual-prepare',
+    title: 'OpenPrd Visual Prepare',
+    body: [
+      'When one confirmed reference image contains multiple sub-images, grid cells, or objects, run `openprd visual-prepare . --reference <effect-image> --grid <columns>x<rows>` or `--boxes <plan.json>` before implementation comparison.',
+      'Treat newly generated images as candidate references until the user confirms they match expectations, should be used for later effect-image vs implementation comparison, and should drive implementation.',
+      'The command writes a deterministic reference-set under `.openprd/harness/visual-reviews/reference-sets/<id>/`, including `reference-set.json`, `crops/`, `contact-sheet.jpg`, `focus-board.template.json`, `parallel-board.template.json`, and `compare-plan.json`.',
+      'Use `--include <csv>` when the user only wants part of a grid or board to enter later acceptance, instead of blindly carrying the whole image forward.',
+      'Always open the generated contact sheet before proceeding, and reject any run where the numbering, crop boundaries, or object completeness look wrong.',
+      'After preparation, use `compare-plan.json` for per-item `openprd visual-compare --reference/--actual` commands, or edit the generated board templates when one whole screen needs local-region acceptance.',
+    ].join('\n'),
+  },
+  {
     id: 'visual-compare',
     title: 'OpenPrd Visual Compare',
     body: [
-      'When UI work has a reference effect image or user-provided design, capture the implemented UI screenshot, then run `openprd visual-compare . --reference <effect-image> --actual <implementation-screenshot>`.',
+      'When UI work has a confirmed reference effect image or user-provided design, capture the implemented UI screenshot, then run `openprd visual-compare . --reference <effect-image> --actual <implementation-screenshot>`.',
+      'Treat newly generated images as candidate references until the user confirms they match expectations, should be used for later effect-image vs implementation comparison, and should drive implementation.',
       'The command creates a side-by-side JPG under `.openprd/harness/visual-reviews/` by default, with Simplified Chinese labels: left `效果图`, right `实现截图`.',
       'When UI work has no reference image, first distinguish new UI from existing UI changes. For new screens, return to the pre-implementation three-direction visual review. For existing UI changes, capture the before screenshot first, implement the change, capture the after screenshot from the same entry, viewport, account, and data state, then run `openprd visual-compare . --before <before-screenshot> --after <after-screenshot>` for a before/after self-check labeled `修改前` / `修改后`.',
+      'When one reference image contains multiple sub-images, grid cells, or objects, run `openprd visual-prepare . --reference <effect-image> --grid <columns>x<rows>` or `--boxes <plan.json>` first so the agent compares item by item instead of comparing the whole board blindly.',
       'When local detail matters more than the whole screen, prepare a board JSON and run `openprd visual-compare . --board <board.json>` to generate a `focus-board` with overview boxes plus numbered zoom panels.',
       'When the agent explores multiple optimization directions in parallel, use `openprd visual-compare . --board <board.json>` with `mode=parallel-board` to assemble screenshots, GIF first frames, and key metrics into one review board.',
-      'Inspect the generated image and keep iterating until there are no obvious visual differences before claiming completion.',
-      'For large UI changes before implementation, decide from user goal, information architecture change, visual decision cost, and validation risk. If an existing screen is available, capture the current in-product screen with Codex Computer Use; if this is a cold-start screen, create a design brief from the confirmed PRD, audience, first slice, and visual goal. Generate at least three Image 2 directions from that screenshot or brief, combine them into one horizontal numbered contact sheet under `.openprd/harness/visual-reviews/`, and wait for the user to choose a direction.',
+      'Inspect the generated image and keep iterating until there are no obvious visual differences before claiming completion. If the user says the implementation looks wrong, ugly, inconsistent, or asks for replication, do not claim you already compared it without producing at least one visual evidence artifact.',
+      'For large UI changes before implementation, decide from user goal, information architecture change, visual decision cost, and validation risk. If an existing screen is available, capture the current in-product screen with Codex Computer Use; if this is a cold-start screen, create a design brief from the confirmed PRD, audience, first slice, and visual goal. Generate at least three Image 2 directions from that screenshot or brief, combine them into one horizontal numbered contact sheet as a candidate effect-image board, and ask the user whether it matches expectations, should be used for later comparison, and should drive implementation before you store the chosen reference-set under `.openprd/harness/visual-reviews/`.',
     ].join('\n'),
   },
   {
@@ -741,7 +779,10 @@ function renderCommandCatalog() {
     '',
     '## 设计与实现准备',
     '',
-    '- 大界面改动视觉方案评审：先按用户目标、信息架构变化、视觉决策成本和验证风险判断是否需要方案评审；已有界面时用 Codex Computer Use 截取产品内当前功能截图，冷启动没有现有界面时用已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief；再用 `imagegen`（Codex 原生 Image 2）生成至少 3 个设计方向，并横向拼接为一张左上角标注 1/2/3 的大图保存到 `.openprd/harness/visual-reviews/`，用户确认方向后再进入大 UI 实现。',
+    '- 界面、页面、视觉、样式、信息架构或前端体验任务进入实现前，先读取 `$openprd-frontend-design` 与 `.openprd/design/`；优先补齐 `.openprd/design/active/facts-sheet.md`、`asset-spec.md`、`image-preflight.md`、`direction-plan.md`、`selected-direction.md`，再开始编码。如果用户已经给了效果图、设计稿、参考截图或其他明确参考图，先把它当成主参考源：只有现有 starter、theme、layout 足够接近时才复用，不接近就允许偏离默认组合，以参考图为准。空白工作区优先从 `.openprd/design/templates/` 里挑最近模板；如果当前轮用户已经把页面主题、模块范围或“直接实现”的意图说清，优先运行 `openprd run . --context --message <用户原话>`。如果页面主题和模块范围已经明确，优先运行 `openprd design-starter . --starter <starter-id> --out index.html --brief "<页面主题>" --sections "<模块1|模块2|模块3>"` 起第一版真实页面。只有当前页确认不依赖外部产品事实、品牌素材或真实图片，才在 active design artifacts 写清无依赖并补 `--no-external-facts --no-brand-assets --no-real-images`；若题目更像旅游、导览、展览、博物馆、城市、自然观察或案例内容页，先不要带 `--no-real-images`，让 starter 先尝试补首批真实图片；若这类冷启动即使带 message 仍短暂返回 `clarify-user`，把它当成摘要级提醒，先用 3 到 5 行 mini-plan 收口，再继续。starter 落地后默认进入 `Patch Mode`：必须直接在生成的入口文件上补丁修改；即使结构要大改，也是在同一路径内覆盖，不做 delete-first，更不要删除 `index.html` 后另起新稿。如果确实要整页重写，先把完整新稿写到 sibling draft，例如 `index.next.html`，确认内容成形后再覆盖回 `index.html`，不要让正式入口出现空窗。starter 一落地后，只允许做一轮就地对焦：快速读一次生成的入口文件和必要的 active design artifacts；这轮对焦结束后，下一步就必须是真实写入口，不要再回头搜网页、翻 `docs/basic/` 或继续模板漫游。把最后一批必要的查事实、查图、读模板动作放在口头宣布之前做完；一旦已经说“开始覆盖入口文件”或“开始整页重写”，下一步必须出现真实写文件动作，而不是继续只读浏览、压图或停在口头承诺；必要时 hook 会把这类非写入动作挡回去。`Patch Mode` 完成不等于只补合同、只下载素材或只写计划；至少要把入口文件本体改完、主要占位清掉，并把已准备好的真实图片或参考约束真正落进页面。',
+    '- `openprd design-starter . --starter <content-home|product-launch|ops-dashboard> --out <index.html>`：把内置页面模板直接落成当前项目入口文件，避免空白工作区卡在“知道该用哪份模板，但还没真正开始写页面”的阶段。若再补 `--brief <页面主题> --sections <模块1|模块2|模块3>`，starter 会同步写实 active design artifacts，并把模板占位替成第一版真实内容。',
+    '- 没有明确参考方向时，不要直接落回同一种安全极简解；先在 `.openprd/design/active/direction-plan.md` 里给出 3 个异源方向，至少拉开 lens、theme、layout 或素材策略。',
+    '- 大界面改动视觉方案评审：先按用户目标、信息架构变化、视觉决策成本和验证风险判断是否需要方案评审；已有界面时用 Codex Computer Use 截取产品内当前功能截图，冷启动没有现有界面时用已确认 PRD、用户群体、第一版切片和视觉目标生成设计 brief；再用 `imagegen`（Codex 原生 Image 2）生成至少 3 个设计方向，并横向拼接为一张左上角标注 1/2/3 的大图作为候选效果图。Agent 主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现；只有确认后，才把选定方向、整张图或其中子图整理到 `.openprd/harness/visual-reviews/`，并进入大 UI 实现。',
     '- `openprd change . --generate --change <id>`：把 PRD 转成 change。',
     '- `openprd change . --validate --change <id>`：校验 change 结构。',
     '- `openprd tasks . --change <id>`：查看当前 dependency-ready 任务。',
@@ -768,9 +809,10 @@ function renderCommandCatalog() {
     '',
     '## 视觉与质量',
     '',
-    '- `openprd visual-compare . --reference <效果图> --actual <实现截图>`：实现阶段已有参考图后，输出左右对比 JPG。',
+    '- `openprd visual-prepare . --reference <效果图> --grid <列>x<行>` / `--boxes <plan.json>`：把整板、网格图或多对象参考图整理成 reference-set，生成 crops、contact sheet 和 board 模板；先检查 contact sheet，再决定哪些对象进入后续实现与验收。',
+    '- `openprd visual-compare . --reference <效果图> --actual <实现截图>`：实现阶段已有确认参考图后，输出左右对比 JPG；如果参考图是一张多子图、网格或多对象组合，先运行 `visual-prepare` 整理 reference-set，再逐项对比。',
     '- `openprd visual-compare . --before <修改前截图> --after <修改后截图>`：实现阶段没有参考图时先判断新建界面还是修改既有界面；新建界面回到实现前 3 方向方案评审，修改既有界面输出修改前后自检 JPG。',
-    '- `openprd visual-compare . --board <board.json>`：当要审局部细节时输出“局部焦点证据板”；当并行跑了多个优化方向时输出“并行实验证据板”。',
+    '- `openprd visual-compare . --board <board.json>`：当要审局部细节、整板局部映射或多对象验收时输出“局部焦点证据板”；当并行跑了多个优化方向时输出“并行实验证据板”。',
     '- `openprd dev-check . <file...>`：收工回顾 touched code files 的行数状态与下一步动作；需要关注的文件会给最终回复可直接使用的“后续建议”表格行。',
     '- `openprd standards . --verify`：校验 `docs/basic/`、文件说明书、文件夹 README 等标准。',
     '- `openprd quality . --verify`：生成 HTML 质量评估报告并检查 EVO 门禁。',
@@ -1041,9 +1083,10 @@ function agentContractBody() {
     '- 先读 `skills/openprd-router/SKILL.md`；在生成的 Codex / Claude 环境里，优先读同名 `openprd-router` skill。',
     '- 需要具体命令时，优先读 `.openprd/harness/command-catalog.md`，不要继续把命令清单膨胀回 `AGENTS.md`。',
     '- `$openprd-shared`：共用语言、文档影响、敏感信息、浏览器安全、小程序验证、产品文案与 i18n 规则。',
-    '- `$openprd-requirement-intake`：需求入口分流、用户可见需求类型与内部 L0/L1/L2 路由码对照、PRD 场景视角选择。',
+    '- `$openprd-requirement-intake`：需求入口分流、用户可见需求类型与内部 L0/L1/L2 路由码对照、PRD 场景视角选择，以及创业验证闭环。',
     '- `$openprd-test-strategy`：测试策略分流、分层验证、任务级 evidence-plan、升级原因与豁免理由。',
     '- `$openprd-harness`：主工作流、`run/loop`、review/change/tasks 与执行节奏。',
+    '- `$openprd-frontend-design`：前端设计框架、审美资产库、设计主题/骨架/组件/配方/模板，以及事实、素材、图片和方向前置门。',
     '- `$openprd-benchmark-router`：外部技术、公开 GitHub 仓库、benchmark/对标/最佳实践路由。',
     '- `$openprd-standards` / `$openprd-quality`：`docs/basic/`、就绪验证、EVO 门禁、知识沉淀。',
     '- `$openprd-diagram-review` / `$openprd-discovery-loop`：可视评审与长时间只读挖掘。',
@@ -1052,18 +1095,20 @@ function agentContractBody() {
     '',
     '1. 动手前先从 `.openprd/` 重建状态，并先运行 `openprd run . --context`；它是建议上下文，不是自动执行指令。',
     '2. 规划、分析、架构评审、“怎么改”或“会动哪些文件”类请求保持只读；只有用户明确要求实现、继续任务、深度调研、对标复刻或提交时才进入执行。',
-    '3. 先分流再执行：`openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本判断需求类型，并保留内部路由码对照：直接处理=L0，现有功能优化=L1，新功能/新流程方案=L2。用户审查默认把路由码并进“需求类型：直接处理（L0）”这类标签里；只有内部排障确实受益时，才额外附“内部路由码”。直接处理类需求可直接处理并事后说明，不打开正式 PRD/review/change/tasks；现有功能优化先在对话内给 mini-plan 再执行，默认不生成正式 PRD/change/tasks；如果用户刚刚已经确认了 L1 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”，不要用“确认，我们就按这个……”这类像再次索取确认的句子。只有新功能/新流程方案才先走 requirement intake、对话内 requirement 摘要确认，再 `review/change/tasks`，最后才实现。L2 的 requirement 摘要默认按“需求判断 / 需求理解 / 功能范围 / 技术方案”来写，其中“功能范围”和“技术方案”优先用 Markdown 表格，帮助用户一眼看清；`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标，边界、风险、异常例子和技术细节下沉到后面的分项或表格，不要把它们都塞进一整段长话里，也不要把某条示例文案写成固定模板。L2 的首轮澄清只能承诺“我先整理需求摘要给你确认”，不能把 requirement 摘要确认、review 和实现压成一句“你回我一句我就开始实现”。如果 `openprd run . --context` 仍然建议 `clarify-user`，当前这轮回复的目标就只能是 `需求摘要` 或 `1 个最高价值澄清点`，不要写成“我先按默认方案实现”。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。单纯的“请帮我实现/继续实现”只表示有执行意图，不表示可以跳过 requirement 摘要确认、`capture/classify/synthesize` 写入路径或 review；只有用户明确表示“不需要进行任何确认”时，才允许静默走完整 requirement write path。`review.html` 是稳定评审 artifact，不再默认等于唯一的人类停顿点；默认按 decision-points approval policy 执行，只有当前 lane 仍要求人类决策时才在 final answer 主体里停下请求确认；当 review 已确认且 tasks 已就绪但还需要执行授权时，先给执行确认清单再请用户确认。',
+    '3. 先分流再执行：`openprd-requirement-intake` 按影响面、未知数、决策成本和验证成本判断需求类型，并保留内部路由码对照：直接处理=L0，现有功能优化=L1，新功能/新流程方案=L2。用户审查默认把路由码并进“需求类型：直接处理（L0）”这类标签里；只有内部排障确实受益时，才额外附“内部路由码”。直接处理类需求可直接处理并事后说明，不打开正式 PRD/review/change/tasks；现有功能优化先在对话内给 mini-plan 再执行，默认不生成正式 PRD/change/tasks；如果用户刚刚已经确认了 L1 mini-plan、范围边界或正式产品边界，后续承接要写成“已确认，我按这个继续”，不要用“确认，我们就按这个……”这类像再次索取确认的句子。只有新功能/新流程方案才先走 requirement intake、对话内 requirement 摘要确认，再 `review/change/tasks`，最后才实现。L2 的 requirement 摘要默认按“需求判断 / 需求理解 / 功能范围 / 技术方案”来写，其中“功能范围”和“技术方案”优先用 Markdown 表格，帮助用户一眼看清；`需求判断` 和 `需求理解` 先用 1 到 2 句轻量主句说清这次是什么、核心问题和第一版目标，边界、风险、异常例子和技术细节下沉到后面的分项或表格，不要把它们都塞进一整段长话里，也不要把某条示例文案写成固定模板。若当前仍在 0 到 1 探索、脑暴或值不值得做的判断，摘要里还要主动补上“验证与创业闭环”：第一批最容易触达的社区或种子用户、当前替代方案、先怎么手工交付、什么承诺才算真需求、最低成本先验证什么，以及验证阶段怎样先活下来。L2 的首轮澄清只能承诺“我先整理需求摘要给你确认”，不能把 requirement 摘要确认、review 和实现压成一句“你回我一句我就开始实现”。如果 `openprd run . --context` 仍然建议 `clarify-user`，当前这轮回复的目标就只能是 `需求摘要` 或 `1 个最高价值澄清点`，不要写成“我先按默认方案实现”。如果用户的下一条回复只是承接上一轮 requirement 摘要的短跟进，而不是提出新范围、改目标或重新发起分析请求，就把它当成对上一轮摘要、默认方向或选项的继续确认，不要重新开一轮泛化 clarify；应直接按当前对话上下文把已确认事实用 canonical capture 路径、`user-confirmed` 来源写回，而不是继续写 `agent-inferred/project-derived` 的用户澄清字段。单纯的“请帮我实现/继续实现”只表示有执行意图，不表示可以跳过 requirement 摘要确认、`capture/classify/synthesize` 写入路径或 review；只有用户明确表示“不需要进行任何确认”时，才允许静默走完整 requirement write path。`review.html` 是稳定评审 artifact，不再默认等于唯一的人类停顿点；默认按 decision-points approval policy 执行，只有当前 lane 仍要求人类决策时才在 final answer 主体里停下请求确认；当 review 已确认且 tasks 已就绪但还需要执行授权时，先给执行确认清单再请用户确认。',
     '4. change/tasks 就绪后，用 `openprd-test-strategy` 按风险选择单元、集成、端到端、人工、视觉、小程序、性能或安全验证组合，并在任务或报告中保留 evidence-plan；同时根据任务边界记录 execution strategy：小范围修正保持 `serial`，中等规模 L1/L2 可推荐 `parallel-workers`，高风险或大规模实现再升级到 `parallel-workers-isolated`；70/20/10 只作健康形状参考，不作硬门禁。',
-      '5. 纯图片、封面图、配图、海报、插画、图标、贴纸、mockup 或“先看样子”请求默认直接使用 `imagegen`，也就是 Codex 原生 Image 2；其中 logo、icon、avatar、badge 等开发素材在用户未明确要求场景化展示时，默认按独立素材输出（standalone asset）生成：全画布单主体，不额外添加卡片、设备框或其他展示容器；只有实际发生 `imagegen` 调用后，才能汇报生图结果、失败或限流。进入实现阶段时，已有参考图用 `openprd visual-compare --reference/--actual`；没有参考图时先判断新建界面还是修改既有界面，新建界面先按用户目标、信息架构变化、视觉决策成本和验证风险完成 3 方向方案评审，修改既有界面用 `openprd visual-compare --before/--after`；局部细节重点则补 `openprd visual-compare --board <focus-board.json>`，多方向实验则补 `openprd visual-compare --board <parallel-board.json>`。如果用户目标是把工作转成可学习、可复用、可回看、可教学或可沉淀的材料，先按期望产物是否需要章节结构、证据锚点、图文讲解、检索练习、工作示例或长期阅读体验来判断；需要时优先走 `openprd learn .` 生成学习包和阅读器，不要用关键词表触发。',
-    '6. 用户给出会话 ID 并要求继续时，按工具无关的历史会话续接；不要要求工具专属 ID，也不要用当前 active change 或相似历史替代指定会话。',
-      '7. 单个 task 收尾时只运行本任务最小足够验证，并通过 `--evidence`、测试报告或任务 metadata 留下 task-scoped evidence；代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`。阶段收口、全部实现完成、handoff/commit/release/publish 前，再运行 `openprd standards . --verify`、`openprd quality . --verify` 和 `openprd run . --verify`；L2 或跨页面实现的最终回复必须列出最新 HTML 质量报告和 task-scoped Markdown/HTML 测试报告路径。如果还没有 `.openprd/harness/test-reports/` 下的 Markdown / HTML 测试报告，就不要把状态表述成项目级已经闭环。',
-    '8. 微信小程序相关任务默认按“最小足够验证”执行：只有用户明确要求小程序实测、截图、抓日志/网络、复现问题，或当前改动必须依赖运行态证据时，才升级到本地小程序运行态验证；默认沿用当前小程序运行态或开发者工具会话连续验证，不要为了验证自动重开应用；只有用户明确要求从 0 到 1、冷启动或重开时，才从头启动。如果当前客户端没有相应工具，不要假定已经安装，也不要把缺少工具当成阻断。',
-    '9. `openprd init/setup/update/doctor` 记录的 `optionalCapabilities` 是非阻断式增强建议。当前任务明显受益但能力还未配置时，可在后续建议里说明它能帮什么、附官方文档 / GitHub 链接，并询问用户是否需要按当前客户端补配置；不要因为它未配置就阻断当前任务。',
+      '5. 纯图片、封面图、配图、海报、插画、图标、贴纸、mockup 或“先看样子”请求默认直接使用 `imagegen`，也就是 Codex 原生 Image 2；其中 logo、icon、avatar、badge 等开发素材在用户未明确要求场景化展示时，默认按独立素材输出（standalone asset）生成：全画布单主体，不额外添加卡片、设备框或其他展示容器；只有实际发生 `imagegen` 调用后，才能汇报生图结果、失败或限流。生图结果先当候选效果图，不要默认登记到 `.openprd/harness/visual-reviews/`。Agent 要主动确认是否符合预期、是否纳入后续效果图/实现截图对比、以及是否按此继续实现；只有确认后，才把选定方向、整张图或其中子图整理成 reference-set 并进入实现。进入实现阶段时，已有确认参考图用 `openprd visual-compare --reference/--actual`；如果参考图是一张整板、网格图或多对象组合，先运行 `openprd visual-prepare --reference <效果图> --grid <列>x<行>` 或 `--boxes <plan.json>`，确认 contact sheet 后再逐项对比；没有参考图时先判断新建界面还是修改既有界面，新建界面先按用户目标、信息架构变化、视觉决策成本和验证风险完成 3 方向方案评审，修改既有界面用 `openprd visual-compare --before/--after`；局部细节重点则补 `openprd visual-compare --board <focus-board.json>`，多方向实验则补 `openprd visual-compare --board <parallel-board.json>`。用户后续如果说“跟效果图”“不一致”“好丑”“复刻”，不能只口头说对比过了，至少先产出一份视觉证据图。如果用户目标是把工作转成可学习、可复用、可回看、可教学或可沉淀的材料，先按期望产物是否需要章节结构、证据锚点、图文讲解、检索练习、工作示例或长期阅读体验来判断；需要时优先走 `openprd learn .` 生成学习包和阅读器，不要用关键词表触发。',
+    '6. 界面、页面、视觉、样式、信息架构或前端体验任务进入实现前，先读取 `$openprd-frontend-design`，并用 `.openprd/design/active/` 补齐 `facts-sheet / asset-spec / image-preflight / direction-plan / selected-direction`；空白工作区优先从 `.openprd/design/templates/` 选最近模板。若用户已经给了效果图、设计稿、参考截图或其他明确参考图，先把它当成主参考源；只有现有 starter、theme、layout 足够接近时才复用，不接近就允许偏离默认组合，以参考图为准。若当前轮用户已经把页面主题、模块范围或“直接实现”的意图说清，优先运行 `openprd run . --context --message <用户原话>`。若页面主题和模块范围已经明确，优先运行 `openprd design-starter . --starter <starter-id> --out index.html --brief "<页面主题>" --sections "<模块1|模块2|模块3>"` 起第一版真实页面；只有这个页面本来就不依赖外部产品事实、品牌素材或真实图片时，才在 active design artifacts 写清无依赖并补 `--no-external-facts --no-brand-assets --no-real-images`；若题目更像旅游、导览、展览、博物馆、城市、自然观察或案例内容页，先不要带 `--no-real-images`，让 starter 先尝试补首批真实图片；若这类冷启动即使带 message 仍短暂返回 `clarify-user`，把它当成摘要级提醒，先用 3 到 5 行 mini-plan 收口，再继续。starter 落地后默认进入 `Patch Mode`，必须直接在生成的入口文件上补丁修改；即使结构要大改，也是在同一路径内覆盖，不做 delete-first，更不要删除 `index.html` 后另起新稿。如果确实要整页重写，先把完整新稿写到 sibling draft，例如 `index.next.html`，确认内容成形后再覆盖回 `index.html`，不要让正式入口出现空窗；starter 一落地后，只允许做一轮就地对焦：快速读一次生成的入口文件和必要的 active design artifacts；这轮对焦结束后，下一步就必须是真实写入口，不要再回头搜网页、翻 `docs/basic/` 或继续模板漫游；把最后一批必要的查事实、查图、读模板动作放在口头宣布之前做完；一旦已经说“开始覆盖入口文件”或“开始整页重写”，下一步必须出现真实写文件动作，而不是继续只读浏览、压图或停在口头承诺；必要时 hook 会把这类非写入动作挡回去；`Patch Mode` 完成不等于只补合同、只下载素材或只写计划；至少要把入口文件本体改完、主要占位清掉，并把已准备好的真实图片或参考约束真正落进页面；没有明确参考方向时，不要直接落回同一种安全极简解。',
+    '7. 用户给出会话 ID 并要求继续时，按工具无关的历史会话续接；不要要求工具专属 ID，也不要用当前 active change 或相似历史替代指定会话。',
+      '8. 单个 task 收尾时只运行本任务最小足够验证，并通过 `--evidence`、测试报告或任务 metadata 留下 task-scoped evidence；代码修改完成后、最终回复前，针对本轮实际 touched code files 运行 `openprd dev-check . <file...>`。阶段收口、全部实现完成、handoff/commit/release/publish 前，再运行 `openprd standards . --verify`、`openprd quality . --verify` 和 `openprd run . --verify`；L2 或跨页面实现的最终回复必须列出最新 HTML 质量报告和 task-scoped Markdown/HTML 测试报告路径。如果还没有 `.openprd/harness/test-reports/` 下的 Markdown / HTML 测试报告，就不要把状态表述成项目级已经闭环。',
+    '9. 微信小程序相关任务默认按“最小足够验证”执行：只有用户明确要求小程序实测、截图、抓日志/网络、复现问题，或当前改动必须依赖运行态证据时，才升级到本地小程序运行态验证；默认沿用当前小程序运行态或开发者工具会话连续验证，不要为了验证自动重开应用；只有用户明确要求从 0 到 1、冷启动或重开时，才从头启动。如果当前客户端没有相应工具，不要假定已经安装，也不要把缺少工具当成阻断。',
+    '10. `openprd init/setup/update/doctor` 记录的 `optionalCapabilities` 是非阻断式增强建议。当前任务明显受益但能力还未配置时，可在后续建议里说明它能帮什么、附官方文档 / GitHub 链接，并询问用户是否需要按当前客户端补配置；不要因为它未配置就阻断当前任务。',
     '',
     '### Hook-Enforced Gates',
     '',
     '- requirement：需求未完成 `clarify/review/change/tasks` 前阻断实现写入；tasks 就绪后，只有用户原始意图已明确要求实现，或后续在看过执行确认清单后明确发出执行指令时才放行。',
     '- research：公开 GitHub 架构/对标先 DeepWiki；第三方技术用法、配置、限制、版本差异或迁移先查本地证据，不足时再按 `resolve_library_id -> query_docs` 使用 Context7。',
+    '- design：界面、页面、视觉和前端体验任务进入实现前，先读取 `$openprd-frontend-design`，并补齐 `.openprd/design/active/` 下的事实、素材、图片和方向合同。',
     '- skill-visualization：修改 skill、`SKILL.md`、`AGENTS.md` 或相关 workflow 前，先输出彩色 Mermaid 方案并等待用户确认。',
     '- secrets / weapp / browser / copy：分别处理 `secrets-vault`、按需的小程序运行态验证、窗口归属与 i18n/普通用户文案提醒。',
     '- 需要细节时，读 router 指向的 skill 和 command catalog，而不是继续扩写 `AGENTS.md`。',
@@ -1221,11 +1266,11 @@ function renderCodexHookRunner() {
   return readFileSync(cjoin(PACKAGE_ROOT, 'src', 'codex-hook-runner-template.mjs'), 'utf8').trimEnd();
 }
 
-function ensureFeatureHooks(text) {
+function normalizeFeatureHooks(text) {
   const featureHeader = /^\[features\]\s*$/m;
   if (!featureHeader.test(text)) {
     const prefix = text.trimEnd();
-    return `${prefix ? `${prefix}\n\n` : ''}[features]\ncodex_hooks = true\n`;
+    return `${prefix ? `${prefix}\n\n` : ''}[features]\nhooks = true\n`;
   }
 
   const lines = text.split(/\r?\n/);
@@ -1237,28 +1282,22 @@ function ensureFeatureHooks(text) {
       break;
     }
   }
+  const normalized = [];
   let hasHooks = false;
-  const legacyHookLines = [];
   for (let index = start + 1; index < end; index += 1) {
-    if (/^\s*codex_hooks\s*=/.test(lines[index])) {
-      lines[index] = 'codex_hooks = true';
-      hasHooks = true;
-    } else if (/^\s*hooks\s*=/.test(lines[index])) {
-      legacyHookLines.push(index);
+    if (/^\s*(hooks|codex_hooks)\s*=/.test(lines[index])) {
+      if (!hasHooks) {
+        normalized.push('hooks = true');
+        hasHooks = true;
+      }
+      continue;
     }
+    normalized.push(lines[index]);
   }
-  if (hasHooks) {
-    for (let index = legacyHookLines.length - 1; index >= 0; index -= 1) {
-      lines.splice(legacyHookLines[index], 1);
-    }
-  } else if (legacyHookLines.length > 0) {
-    lines[legacyHookLines[0]] = 'codex_hooks = true';
-    for (let index = legacyHookLines.length - 1; index >= 1; index -= 1) {
-      lines.splice(legacyHookLines[index], 1);
-    }
-  } else {
-    lines.splice(end, 0, 'codex_hooks = true');
+  if (!hasHooks) {
+    normalized.push('hooks = true');
   }
+  lines.splice(start + 1, end - start - 1, ...normalized);
   return lines.join('\n');
 }
 
@@ -1271,7 +1310,10 @@ function codexHooksTomlBlock(projectRoot, options = {}) {
     if (matcher) {
       groups.push(`matcher = ${quoteForToml(matcher)}`);
     }
-    groups.push(`hooks = [{ type = "command", command = ${quoteForToml(hookCommand(projectRoot, eventName, options))}, timeout = 15000 }]`);
+    groups.push(`[[hooks.${eventName}.hooks]]`);
+    groups.push('type = "command"');
+    groups.push(`command = ${quoteForToml(hookCommand(projectRoot, eventName, options))}`);
+    groups.push('timeout = 15000');
     groups.push('');
   }
   return groups.join('\n').trimEnd();
@@ -1292,7 +1334,7 @@ async function writeCodexConfig(projectRoot, options, changes) {
   const configPath = cjoin(projectRoot, '.codex', 'config.toml');
   const rel = normalizedRelativePath(projectRoot, configPath);
   const current = await readText(configPath).catch(() => '');
-  let next = ensureFeatureHooks(current || '');
+  let next = normalizeFeatureHooks(current || '');
   next = upsertTomlManagedBlock(next, 'CODEX-HOOKS', codexHooksTomlBlock(projectRoot, options));
   await writeText(configPath, next);
   changes.push({ path: rel, status: current ? 'updated' : 'created' });
@@ -1307,7 +1349,7 @@ async function writeCodexConfig(projectRoot, options, changes) {
 async function writeCodexUserConfig(options, changes) {
   const configPath = cjoin(resolveCodexHome(options), 'config.toml');
   const current = await readText(configPath).catch(() => '');
-  const next = ensureFeatureHooks(current || '');
+  const next = normalizeFeatureHooks(current || '');
   if (next !== current) {
     await writeText(configPath, next);
   }
@@ -1319,7 +1361,7 @@ async function writeCodexUserConfig(options, changes) {
     path: displayPath(configPath),
     scope: 'user',
     kind: 'codex-user-config',
-    marker: 'codex_hooks = true',
+    marker: 'hooks = true',
   });
 }
 
@@ -1869,25 +1911,33 @@ export async function doctorOpenPrdAgentIntegration(projectRoot, options = {}) {
   await collectGeneratedDoctorCheck(projectRoot, checks, '.openprd/harness/command-catalog.md', 'OpenPrd command catalog');
 
   if (tools.includes('codex')) {
-    await collectDoctorCheck(projectRoot, checks, '.codex/config.toml', (file) => fileHas(file, 'codex_hooks = true'), 'Codex hooks feature is not enabled.');
+    await collectDoctorCheck(projectRoot, checks, '.codex/config.toml', (file) => fileHas(file, '[[hooks.UserPromptSubmit]]') && fileHas(file, '[[hooks.PreToolUse]]'), 'Codex config is missing OpenPrd hook definitions.');
     await collectDoctorCheck(projectRoot, checks, '.codex/hooks.json', (file) => fileHas(file, 'openprd-hook.mjs'), 'Codex hooks.json is missing OpenPrd hooks.');
     await collectDoctorCheck(projectRoot, checks, '.codex/hooks/openprd-hook.mjs', (file) => fileHas(file, 'OpenPrd harness 上下文'), 'Codex hook runner is missing.');
     const smoke = await smokeTestCodexHook(projectRoot, { hookProfile });
     checks.push({ path: '.codex/hooks/openprd-hook.mjs:smoke', ok: smoke.ok, message: smoke.message });
     await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-router/SKILL.md', 'Codex OpenPrd router skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-requirement-intake/SKILL.md', 'Codex OpenPrd requirement intake skill');
+    await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-frontend-design/SKILL.md', 'Codex OpenPrd frontend design skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-test-strategy/SKILL.md', 'Codex OpenPrd test strategy skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-harness/SKILL.md', 'Codex OpenPrd harness skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.codex/skills/openprd-learning-review/SKILL.md', 'Codex OpenPrd learning review skill');
     if (options.enableUserCodexConfig) {
       const userConfigPath = cjoin(resolveCodexHome(options), 'config.toml');
-      await collectDoctorCheckAbsolute(checks, displayPath(userConfigPath), userConfigPath, (file) => fileHas(file, 'codex_hooks = true'), 'User Codex config has not enabled hooks.');
+      if (await exists(userConfigPath)) {
+        await collectDoctorCheckAbsolute(checks, displayPath(userConfigPath), userConfigPath, async (file) => {
+          const hasHooks = await fileHas(file, 'hooks = true');
+          const hasLegacyHooks = await fileHas(file, 'codex_hooks = true');
+          return hasHooks && !hasLegacyHooks;
+        }, 'User Codex config hook feature flags are not normalized.');
+      }
     }
   }
   if (tools.includes('claude')) {
     await collectDoctorCheck(projectRoot, checks, 'CLAUDE.md', (file) => fileHas(file, 'OPENPRD:CLAUDE:START'), 'Missing OpenPrd managed CLAUDE block.');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-router/SKILL.md', 'Claude OpenPrd router skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-requirement-intake/SKILL.md', 'Claude OpenPrd requirement intake skill');
+    await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-frontend-design/SKILL.md', 'Claude OpenPrd frontend design skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-test-strategy/SKILL.md', 'Claude OpenPrd test strategy skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-harness/SKILL.md', 'Claude OpenPrd harness skill');
     await collectGeneratedDoctorCheck(projectRoot, checks, '.claude/skills/openprd-learning-review/SKILL.md', 'Claude OpenPrd learning review skill');

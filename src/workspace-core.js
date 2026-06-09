@@ -20,6 +20,28 @@ const CORE_TEMPLATE_FILES = [
   'README.md',
   'README_EN.md',
   'config.yaml',
+  'design/README.md',
+  'design/README_EN.md',
+  'design/anti-slop.md',
+  'design/lenses/frontend-lenses.md',
+  'design/themes/theme-catalog.json',
+  'design/layouts/layout-catalog.json',
+  'design/components/component-catalog.md',
+  'design/recipes/product-launch.md',
+  'design/recipes/content-experience.md',
+  'design/recipes/operational-tool.md',
+  'design/checklists/ui-quality-gate.md',
+  'design/assets/surface-presets.md',
+  'design/templates/README.md',
+  'design/templates/README_EN.md',
+  'design/templates/content-home.html',
+  'design/templates/product-launch.html',
+  'design/templates/ops-dashboard.html',
+  'design/active/facts-sheet.md',
+  'design/active/asset-spec.md',
+  'design/active/image-preflight.md',
+  'design/active/direction-plan.md',
+  'design/active/selected-direction.md',
   'schema/prd.schema.yaml',
   'schema/diagram-architecture.schema.yaml',
   'schema/diagram-product-flow.schema.yaml',
@@ -60,6 +82,28 @@ const CORE_TEMPLATE_FILES = [
 const WORKSPACE_SEED_REFRESH_FILES = [
   'README.md',
   'README_EN.md',
+  'design/README.md',
+  'design/README_EN.md',
+  'design/anti-slop.md',
+  'design/lenses/frontend-lenses.md',
+  'design/themes/theme-catalog.json',
+  'design/layouts/layout-catalog.json',
+  'design/components/component-catalog.md',
+  'design/recipes/product-launch.md',
+  'design/recipes/content-experience.md',
+  'design/recipes/operational-tool.md',
+  'design/checklists/ui-quality-gate.md',
+  'design/assets/surface-presets.md',
+  'design/templates/README.md',
+  'design/templates/README_EN.md',
+  'design/templates/content-home.html',
+  'design/templates/product-launch.html',
+  'design/templates/ops-dashboard.html',
+  'design/active/facts-sheet.md',
+  'design/active/asset-spec.md',
+  'design/active/image-preflight.md',
+  'design/active/direction-plan.md',
+  'design/active/selected-direction.md',
   'schema/prd.schema.yaml',
   'schema/diagram-architecture.schema.yaml',
   'schema/diagram-product-flow.schema.yaml',
@@ -87,6 +131,9 @@ const WORKSPACE_SEED_REFRESH_FILES = [
 ];
 const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'artifacts',
+  'benchmarks/.DS_Store',
+  'benchmarks/evidence',
+  'benchmarks/inbox',
   'discovery',
   'growth',
   'harness',
@@ -99,6 +146,8 @@ const WORKSPACE_SEED_COPY_IGNORE = new Set([
   'engagements/active/architecture-diagram.html',
   'engagements/active/architecture-diagram.json',
   'engagements/active/architecture-diagram.mmd',
+  'engagements/active/brainstorm.html',
+  'engagements/active/brainstorm.json',
   'engagements/active/decision-log.md',
   'engagements/active/product-flow-diagram.html',
   'engagements/active/product-flow-diagram.json',
@@ -326,6 +375,7 @@ function buildWorkflowTaskGraph(snapshot = null, analysis = null, options = {}) 
   const isSynthesized = Boolean(snapshot?.digest || prdVersion > 0);
   const isFrozen = snapshot?.status === 'frozen';
   const isHandedOff = snapshot?.status === 'handed_off';
+  const brainstormDone = Boolean(snapshot?.brainstormMeta?.generatedAt || snapshot?.brainstormMeta?.artifactId);
   const isInterviewComplete = Boolean(
     snapshot?.sections?.problem?.problemStatement
     && snapshot?.sections?.users?.primaryUsers?.length
@@ -347,6 +397,13 @@ function buildWorkflowTaskGraph(snapshot = null, analysis = null, options = {}) 
   const clarifyGateActive = Boolean(clarificationState?.shouldAskUser);
 
   const workflow = [
+    {
+      id: 'brainstorm',
+      label: 'brainstorm',
+      kind: 'workflow-step',
+      status: brainstormDone ? 'done' : 'ready',
+      dependsOn: [],
+    },
     {
       id: 'clarify',
       label: 'clarify',
@@ -434,6 +491,13 @@ function buildWorkflowTaskGraph(snapshot = null, analysis = null, options = {}) 
       kind: 'record',
       status: 'ready',
       dependsOn: [],
+    },
+    {
+      id: 'brainstorm-file',
+      label: 'brainstorm.html',
+      kind: 'artifact',
+      status: brainstormDone ? 'done' : 'ready',
+      dependsOn: ['brainstorm'],
     },
     {
       id: 'open-questions',
@@ -560,6 +624,7 @@ function buildWorkflowTaskGraph(snapshot = null, analysis = null, options = {}) 
       })),
     ],
     edges: [
+      { from: 'brainstorm', to: 'brainstorm-file', relation: 'produces' },
       { from: 'clarify', to: 'classify', relation: 'unblocks' },
       { from: 'classify', to: 'interview', relation: 'enables' },
       { from: 'interview', to: 'synthesize', relation: 'enables' },
@@ -667,6 +732,15 @@ async function ensureWorkspaceSkeleton(projectRoot, options = {}) {
   await fs.mkdir(cjoin(workspaceRoot, 'artifacts', 'archive'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'learning', 'archive'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'quality', 'reports'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'lenses'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'themes'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'layouts'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'components'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'recipes'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'checklists'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'assets'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'templates'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'active'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'growth'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'knowledge', 'incidents'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'knowledge', 'patterns'), { recursive: true });
@@ -734,6 +808,17 @@ async function migrateWorkspaceConfig(projectRoot, changes) {
     quality: {
       ...(seed.quality ?? {}),
       ...(current.quality ?? {}),
+    },
+    design: {
+      ...(seed.design ?? {}),
+      ...(current.design ?? {}),
+      enabled: current.design?.enabled ?? seed.design?.enabled ?? true,
+      frameworkRoot: current.design?.frameworkRoot ?? seed.design?.frameworkRoot ?? '.openprd/design',
+      templateRoot: current.design?.templateRoot ?? seed.design?.templateRoot ?? '.openprd/design/templates',
+      activeArtifacts: {
+        ...(seed.design?.activeArtifacts ?? {}),
+        ...(current.design?.activeArtifacts ?? {}),
+      },
     },
     supportedProductTypes: seed.supportedProductTypes,
     templateInheritance: seed.templateInheritance,
@@ -918,6 +1003,15 @@ async function migrateWorkspaceSkeleton(projectRoot, options = {}) {
   await fs.mkdir(cjoin(workspaceRoot, 'artifacts', 'archive'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'learning', 'archive'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'quality', 'reports'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'lenses'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'themes'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'layouts'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'components'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'recipes'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'checklists'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'assets'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'templates'), { recursive: true });
+  await fs.mkdir(cjoin(workspaceRoot, 'design', 'active'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'growth'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'knowledge', 'incidents'), { recursive: true });
   await fs.mkdir(cjoin(workspaceRoot, 'knowledge', 'patterns'), { recursive: true });
@@ -1020,6 +1114,8 @@ async function loadWorkspace(projectRoot, options = {}) {
     activeFlows: cjoin(workspaceRoot, 'engagements', 'active', 'flows.md'),
     activeRoles: cjoin(workspaceRoot, 'engagements', 'active', 'roles.md'),
     activeHandoff: cjoin(workspaceRoot, 'engagements', 'active', 'handoff.md'),
+    activeBrainstormHtml: cjoin(workspaceRoot, 'engagements', 'active', 'brainstorm.html'),
+    activeBrainstormState: cjoin(workspaceRoot, 'engagements', 'active', 'brainstorm.json'),
     activeReviewHtml: cjoin(workspaceRoot, 'engagements', 'active', 'review.html'),
     reviewsDir: cjoin(workspaceRoot, 'reviews'),
     artifactsActiveDir: cjoin(workspaceRoot, 'artifacts', 'active'),
@@ -1033,6 +1129,24 @@ async function loadWorkspace(projectRoot, options = {}) {
     qualityReportsDir: cjoin(workspaceRoot, 'quality', 'reports'),
     qualityReportIndex: cjoin(workspaceRoot, 'quality', 'reports', 'index.json'),
     qualityReportLatest: cjoin(workspaceRoot, 'quality', 'reports', 'latest.json'),
+    designRoot: cjoin(workspaceRoot, 'design'),
+    designReadme: cjoin(workspaceRoot, 'design', 'README.md'),
+    designLenses: cjoin(workspaceRoot, 'design', 'lenses', 'frontend-lenses.md'),
+    designThemes: cjoin(workspaceRoot, 'design', 'themes', 'theme-catalog.json'),
+    designLayouts: cjoin(workspaceRoot, 'design', 'layouts', 'layout-catalog.json'),
+    designComponents: cjoin(workspaceRoot, 'design', 'components', 'component-catalog.md'),
+    designChecklist: cjoin(workspaceRoot, 'design', 'checklists', 'ui-quality-gate.md'),
+    designAntiSlop: cjoin(workspaceRoot, 'design', 'anti-slop.md'),
+    designTemplatesRoot: cjoin(workspaceRoot, 'design', 'templates'),
+    designTemplatesReadme: cjoin(workspaceRoot, 'design', 'templates', 'README.md'),
+    designContentHomeTemplate: cjoin(workspaceRoot, 'design', 'templates', 'content-home.html'),
+    designProductLaunchTemplate: cjoin(workspaceRoot, 'design', 'templates', 'product-launch.html'),
+    designOpsDashboardTemplate: cjoin(workspaceRoot, 'design', 'templates', 'ops-dashboard.html'),
+    designFactsSheet: cjoin(workspaceRoot, 'design', 'active', 'facts-sheet.md'),
+    designAssetSpec: cjoin(workspaceRoot, 'design', 'active', 'asset-spec.md'),
+    designImagePreflight: cjoin(workspaceRoot, 'design', 'active', 'image-preflight.md'),
+    designDirectionPlan: cjoin(workspaceRoot, 'design', 'active', 'direction-plan.md'),
+    designSelectedDirection: cjoin(workspaceRoot, 'design', 'active', 'selected-direction.md'),
     growthDir: cjoin(workspaceRoot, 'growth'),
     growthCandidates: cjoin(workspaceRoot, 'growth', 'candidates.jsonl'),
     growthAccepted: cjoin(workspaceRoot, 'growth', 'accepted.json'),
@@ -1122,6 +1236,13 @@ const USER_CLARIFICATION_PATHS = new Set([
   'problem.problemStatement',
   'problem.whyNow',
   'users.primaryUsers',
+  'validation.community',
+  'validation.seedUsers',
+  'validation.currentAlternative',
+  'validation.manualPath',
+  'validation.commitmentSignals',
+  'validation.firstValidationStep',
+  'validation.defaultAlivePlan',
   'goals.goals',
   'goals.successMetrics',
   'scope.inScope',
@@ -1162,6 +1283,13 @@ const FIELD_PATH_TO_STATE_KEY = {
   'users.primaryUsers': 'primaryUsers',
   'users.secondaryUsers': 'secondaryUsers',
   'users.stakeholders': 'stakeholders',
+  'validation.community': 'community',
+  'validation.seedUsers': 'seedUsers',
+  'validation.currentAlternative': 'currentAlternative',
+  'validation.manualPath': 'manualPath',
+  'validation.commitmentSignals': 'commitmentSignals',
+  'validation.firstValidationStep': 'firstValidationStep',
+  'validation.defaultAlivePlan': 'defaultAlivePlan',
   'goals.goals': 'goals',
   'goals.successMetrics': 'successMetrics',
   'goals.acceptanceGoals': 'acceptanceGoals',
@@ -1598,6 +1726,11 @@ function coerceCapturedValue(pathString, rawValue, append = false) {
     'users.primaryUsers',
     'users.secondaryUsers',
     'users.stakeholders',
+    'validation.community',
+    'validation.seedUsers',
+    'validation.manualPath',
+    'validation.commitmentSignals',
+    'validation.defaultAlivePlan',
     'goals.goals',
     'goals.successMetrics',
     'goals.acceptanceGoals',
@@ -1867,8 +2000,11 @@ function buildClarificationPlan(snapshot, analysis) {
   const mustAsk = analysis.missingFields.filter((field) => USER_CLARIFICATION_PATHS.has(field.path));
   const derived = analysis.missingFields.filter((field) => !USER_CLARIFICATION_PATHS.has(field.path));
   const kickoffQuestions = [
+    { id: 'problem.problemStatement', label: '核心问题', prompt: '我们要解决什么问题？' },
     { id: 'project-overview', label: '项目轮廓', prompt: '这件事主要是给谁用的，他们会在什么场景下最先感受到价值？' },
+    { id: 'current-alternative', label: '当前替代', prompt: '他们现在主要靠什么办法、流程或替代品在解决这个问题？' },
     { id: 'first-slice', label: '首版切片', prompt: '如果先做第一版，最值得先让用户完成什么关键动作？' },
+    { id: 'validation-loop', label: '验证闭环', prompt: '如果先不做完整产品，最容易先找谁验证、先怎么手工交付、什么真实承诺最能证明值得继续？' },
     { id: 'guardrails', label: '保护项', prompt: '这轮明确先不做什么，或者哪些既有体验、流程和业务结果不能被影响？' },
   ];
   return {

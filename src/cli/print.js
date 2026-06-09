@@ -48,9 +48,11 @@ import {
 } from './doctor-print.js';
 import { printGrowthResult } from './growth-print.js';
 import {
+  printDesignStarterResult,
   printDevelopmentStandardsResult,
   printKnowledgeResult,
   printQualityResult,
+  printVisualPrepareResult,
   printStandardsResult,
   printVisualCompareResult,
 } from './quality-print.js';
@@ -59,6 +61,7 @@ import {
   printRunResult,
 } from './run-print.js';
 import {
+  printBrainstormResult,
   printDiagramResult,
   printDiffResult,
   printFreezeResult,
@@ -80,6 +83,7 @@ export {
   printLearningResult,
   printReleaseResult,
   printSynthesizeResult,
+  printBrainstormResult,
   printReviewResult,
   printHistoryResult,
   printDiffResult,
@@ -94,9 +98,11 @@ export {
   printLoopResult,
   printStandardsResult,
   printDevelopmentStandardsResult,
+  printDesignStarterResult,
   printGrowthResult,
   printQualityResult,
   printKnowledgeResult,
+  printVisualPrepareResult,
   printVisualCompareResult,
   printFreezeResult,
   printDiagramResult,

@@ -1019,7 +1019,7 @@ function detectKnowledge({ config, knowledgeFiles, candidateState, knowledgeInde
     warnings.push('本次已经达到可交付状态，但还没有自动生成 knowledge candidate；收工前至少保留一条可审查的项目经验草案。');
   }
   if (config.knowledge.enabled && skills.length > 0 && adoption.totals.referenced === 0) {
-    warnings.push('项目级经验 skill 已产出，但还没有任何 run-context 引用记录；优先接入自动命中与注入链路。');
+    warnings.push('项目级经验 skill 已产出，但还没有任何 run-context 引用记录；优先接入候选召回与判断注入链路。');
   }
   return {
     status: !config.knowledge.enabled || hasReusableArtifact ? 'pass' : 'needs-attention',
